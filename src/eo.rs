@@ -1,6 +1,6 @@
 use crate::{error::ParseError, token::Token};
 
-pub fn normalize(input: &str) -> Result<String, ParseError> {
+pub fn normalize(input: &str) -> String {
     todo!()
 }
 
