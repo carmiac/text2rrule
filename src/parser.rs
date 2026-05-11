@@ -3,6 +3,7 @@ use crate::eo;
 use crate::{error::ParseError, token::Token};
 
 /// The parsers for each implemented locale.
+#[derive(Debug)]
 pub enum Parser {
     En, // English
     Eo, // Esperanto

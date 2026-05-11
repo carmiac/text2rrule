@@ -1,5 +1,6 @@
 use chrono::{NaiveDate, NaiveTime};
 
+#[derive(Debug)]
 pub enum FreqWord {
     Daily,
     Weekly,
@@ -8,6 +9,7 @@ pub enum FreqWord {
     Yearly,
 }
 
+#[derive(Debug)]
 pub enum Weekday {
     Monday,
     Tuesday,
@@ -18,11 +20,13 @@ pub enum Weekday {
     Sunday,
 }
 
+#[derive(Debug)]
 pub enum DaySet {
     Weekdays, // Monday-Friday
     Weekend,  // Saturday-Sunday
 }
 
+#[derive(Debug)]
 pub enum Month {
     January,
     February,
@@ -38,6 +42,7 @@ pub enum Month {
     December,
 }
 
+#[derive(Debug)]
 pub enum Token {
     Frequency(FreqWord),  // "daily", "weekly", "monthly", "yearly"
     Interval(u32),        // "every 3", "every other" (= 2)

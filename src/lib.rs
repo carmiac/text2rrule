@@ -3,10 +3,10 @@ mod eo;
 pub mod error;
 mod parser;
 mod token;
+use crate::parser::Parser;
 pub use error::ParseError;
 use sys_locale::get_locales;
-
-use crate::parser::Parser;
+use tracing::debug;
 
 /// Takes a str reference and attempts to convert it into a rrule.
 ///
@@ -24,11 +24,21 @@ pub fn text2rrule_with_locale(
     input: &str,
     locales: impl Iterator<Item = String>,
 ) -> Result<String, ParseError> {
-    let parser = Parser::get_parser(locales).unwrap_or(Parser::En);
+    debug!("Input: {:?}", input);
+    let locales: Vec<String> = locales.collect();
+    debug!("Locales: {:?}", locales);
+    let parser = Parser::get_parser(locales.into_iter()).unwrap_or(Parser::En);
+    debug!("Parser: {:?}", parser);
+
     let normalized = parser.normalize(input);
+    debug!("Normalized: {:?}", normalized);
     let tokens = parser.tokenize(&normalized)?;
+    debug!("Tokens: {:?}", tokens);
     // let pattern = pattern::patternize(&tokens)?;
-    // return emit::rrule(&pattern)?;
+    // debug!("Pattern: {:?}", pattern);
+    // let rrule = emit::rrule(&pattern)?;
+    // debug!("RRULE: {:?}", rrule);
+    // rrule
     todo!()
 }
 
