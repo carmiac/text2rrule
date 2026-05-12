@@ -11,26 +11,28 @@ text2rrule
 Convert a plain language description of a repeating event into a RFC 5545 RRULE.
   
 USEAGE:
-  text2rrule [FLAGS] [OPTIONS]
+  text2rrule [FLAGS] [OPTIONS] [INPUT]
   
-OPTIONS:
-  -i, --input       Input string (defaults to stdin)
-  -l, --locale      Locale string, e.g. 'en-uk', detects current locale if not given.
-
 FLAGS:
   -v, --verbose     Print verbose output for debugging 
   -h, --help        Print this help
 
+OPTIONS:
+  -l, --locale      Locale string, e.g. 'en-uk', detects current locale if not given.
+
+ARGS:
+ <INPUT>           String to convert. If missing will read a line from stdin.
+
 EXAMPLES:
-  text2rrule -i \"every two weeks on Friday\"
+  text2rrule \"every two weeks on Friday\"
   FREQ=WEEKLY;INTERVAL=2;BYDAY=FR
 ";
 
 #[derive(Debug)]
 struct AppArgs {
-    input: Option<String>,
     locale: Option<String>,
     verbose: bool,
+    input: Option<String>,
 }
 
 fn parse_args() -> Result<AppArgs, pico_args::Error> {
@@ -41,9 +43,9 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
     }
     let verbose = pargs.contains(["-v", "--verbose"]);
     let args = AppArgs {
-        input: pargs.opt_value_from_str(["-i", "--input"])?,
         locale: pargs.opt_value_from_str(["-l", "--locale"])?,
         verbose,
+        input: pargs.free_from_str().ok(),
     };
     Ok(args)
 }

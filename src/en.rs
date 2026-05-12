@@ -1,5 +1,3 @@
-use crate::{error::ParseError, token::Token};
-
 /// Normalize a plain-English recurrence string into a canonical form for tokenization.
 pub fn normalize(input: &str) -> String {
     // Basic sanitization: Lowercase, punctuation, whitespace.
@@ -49,6 +47,9 @@ pub fn normalize(input: &str) -> String {
             "biweekly" => "every 2 weeks",
             "bimonthly" => "every 2 months",
             "biannually" => "every 2 years",
+            "annually" => "yearly",
+            "anually" => "yearly",
+            "annualy" => "yearly",
 
             // day abbreviations/misspellings
             "wednsday" => "wednesday",
@@ -98,6 +99,18 @@ pub fn normalize(input: &str) -> String {
             "tenth" => "10",
             "last" => "-1",
 
+            // cardinal number words -> digits
+            "one" => "1",
+            "two" => "2",
+            "three" => "3",
+            "four" => "4",
+            "five" => "5",
+            "six" => "6",
+            "seven" => "7",
+            "eight" => "8",
+            "nine" => "9",
+            "ten" => "10",
+
             // not found, must be ok as is.
             _ => w,
         };
@@ -122,9 +135,221 @@ fn strip_ordinal_suffix(w: &str) -> &str {
     w
 }
 
+use crate::{error::ParseError, token::Token};
+use chrono::{NaiveDate, NaiveTime};
+/// Turn an input str into a vector of tokens.
+///
+/// input should be normalized
+pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
+    use crate::token::DaySet::*;
+    use crate::token::FreqWord::*;
+    use crate::token::Month::*;
+    use crate::token::Weekday::*;
+    use Token::*;
+
+    let mut tokens: Vec<Token> = Vec::new();
+
+    let mut twice = false;
+    let mut the_context = false; // causes next number to be a MonthDay
+    let mut of_context = false; // causes next Frequency to retroactively convert last Interval -> MonthDay
+    let mut until = false;
+    let mut until_month: Option<u32> = None;
+    let mut until_day: Option<i32> = None;
+
+    for word in input.split_whitespace() {
+        let token: Option<Token> = match word {
+            // Simple frequencies.
+            "daily" | "days" | "day" => Some(Frequency(Daily)),
+            "weekly" | "weeks" | "week" => Some(Frequency(Weekly)),
+            "monthly" | "months" | "month" => Some(Frequency(Monthly)),
+            "yearly" | "years" | "year" => Some(Frequency(Yearly)),
+
+            // Days of the week.
+            "monday" => Some(Weekday(Monday)),
+            "tuesday" => Some(Weekday(Tuesday)),
+            "wednesday" => Some(Weekday(Wednesday)),
+            "thursday" => Some(Weekday(Thursday)),
+            "friday" => Some(Weekday(Friday)),
+            "saturday" => Some(Weekday(Saturday)),
+            "sunday" => Some(Weekday(Sunday)),
+            "weekend" | "weekends" => Some(WeekdaySet(Weekend)),
+            "weekday" | "weekdays" => Some(WeekdaySet(Weekdays)),
+
+            // Months
+            "january" => Some(Month(January)),
+            "february" => Some(Month(February)),
+            "march" => Some(Month(March)),
+            "april" => Some(Month(April)),
+            "may" => Some(Month(May)),
+            "june" => Some(Month(June)),
+            "july" => Some(Month(July)),
+            "august" => Some(Month(August)),
+            "september" => Some(Month(September)),
+            "october" => Some(Month(October)),
+            "november" => Some(Month(November)),
+            "december" => Some(Month(December)),
+
+            // filler words
+            "every" | "at" | "on" | "a" | "per" | "and" => continue,
+
+            "the" => {
+                the_context = true;
+                continue;
+            }
+
+            "of" => {
+                of_context = true;
+                continue;
+            }
+
+            // plain numbers: negative -> OrdinalPosition, after "the" -> MonthDay, else -> Interval
+            s if let Ok(n) = s.parse::<i32>() => {
+                if n < 0 {
+                    Some(OrdinalPosition(n))
+                } else if the_context {
+                    the_context = false;
+                    Some(MonthDay(n as u8))
+                } else {
+                    Some(Interval(n))
+                }
+            }
+
+            "until" => {
+                until = true;
+                continue;
+            }
+
+            // "3 times" -> Count(3): convert the last Interval that was already pushed
+            "times" => {
+                if let Some(Interval(n)) = tokens.last().copied() {
+                    *tokens.last_mut().unwrap() = Count(n as u32);
+                }
+                continue;
+            }
+
+            "twice" => {
+                twice = true;
+                continue;
+            }
+
+            // Time
+            s if is_time(s) => {
+                if let Ok(t) = NaiveTime::parse_from_str(s, "%H:%M") {
+                    Some(TimeOfDay(t))
+                } else if let Ok(t) = NaiveTime::parse_from_str(s, "%I:%M%P") {
+                    Some(TimeOfDay(t))
+                } else {
+                    return Err(ParseError::UnrecognizedInput(format!(
+                        "unrecognized time: {s}"
+                    )));
+                }
+            }
+            _ => {
+                return Err(ParseError::UnrecognizedInput(format!(
+                    "unrecognized word: {word}"
+                )))
+            }
+        };
+
+        if let Some(token) = token {
+            // "twice a year" special case
+            if twice {
+                if token == Frequency(Yearly) {
+                    tokens.push(Interval(6));
+                    tokens.push(Frequency(Monthly));
+                    continue;
+                } else {
+                    return Err(ParseError::UnsupportedPattern(input.into()));
+                }
+            }
+
+            // Collect tokens for "until <Month> <day> <year>"
+            if until {
+                match &token {
+                    Month(m) => {
+                        until_month = Some(m.as_u32());
+                        continue;
+                    }
+                    Interval(n) if until_month.is_some() && until_day.is_none() => {
+                        until_day = Some(*n);
+                        continue;
+                    }
+                    Interval(n) if until_month.is_some() && until_day.is_some() => {
+                        let date = NaiveDate::from_ymd_opt(
+                            *n,
+                            until_month.unwrap(),
+                            until_day.unwrap() as u32,
+                        )
+                        .ok_or_else(|| {
+                            ParseError::UnrecognizedInput("invalid until date".into())
+                        })?;
+                        tokens.push(UntilDate(date));
+                        until = false;
+                        until_month = None;
+                        until_day = None;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            // "the N <weekday>": MonthDay followed by Weekday means it was actually OrdinalPosition
+            if let Weekday(_) = &token {
+                if let Some(MonthDay(n)) = tokens.last().copied() {
+                    *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
+                }
+            }
+
+            // "N of the month" / "N <weekday> of the month": retroactively fix preceding Interval
+            if of_context {
+                if let Frequency(_) = &token {
+                    let len = tokens.len();
+                    if len >= 2 {
+                        // "N <weekday> of the month" → OrdinalPosition(N)
+                        if let (Interval(n), Weekday(_)) = (tokens[len - 2], tokens[len - 1]) {
+                            tokens[len - 2] = OrdinalPosition(n);
+                        }
+                    } else if let Some(Interval(n)) = tokens.last().copied() {
+                        // "N of the month" → MonthDay(N)
+                        *tokens.last_mut().unwrap() = MonthDay(n as u8);
+                    }
+                    of_context = false;
+                }
+            }
+
+            tokens.push(token);
+        }
+    }
+
+    Ok(tokens)
+}
+
+fn is_time(s: &str) -> bool {
+    let s = s
+        .strip_suffix("am")
+        .or_else(|| s.strip_suffix("pm"))
+        .unwrap_or(s);
+    let mut parts = s.splitn(2, ':');
+    match (parts.next(), parts.next()) {
+        (Some(h), Some(m)) => {
+            matches!(h.len(), 1..=2)
+                && m.len() == 2
+                && h.chars().all(|c| c.is_ascii_digit())
+                && m.chars().all(|c| c.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::token::DaySet::*;
+    use crate::token::FreqWord::*;
+    use crate::token::Month::*;
+    use crate::token::Weekday::*;
+    use chrono::{NaiveDate, NaiveTime};
+    use Token::*;
 
     #[test]
     fn lowercase() {
@@ -300,8 +525,196 @@ mod tests {
         assert_eq!(normalize("Fortnightly on Tues"), "every 2 weeks on tuesday");
         assert_eq!(normalize("Quarterly"), "every 3 months");
     }
-}
 
-pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
-    todo!()
+    #[test]
+    fn token_frequency() {
+        assert_eq!(
+            tokenize(&normalize("DAILY")),
+            Ok(vec![Token::Frequency(Daily)])
+        );
+        assert_eq!(
+            tokenize(&normalize("weekly")),
+            Ok(vec![Token::Frequency(Weekly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("monthly")),
+            Ok(vec![Token::Frequency(Monthly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("yearly")),
+            Ok(vec![Token::Frequency(Yearly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("annualy")),
+            Ok(vec![Token::Frequency(Yearly)])
+        );
+    }
+
+    #[test]
+    fn token_time() {
+        assert_eq!(
+            tokenize(&normalize("daily at 9:30am")),
+            Ok(vec![
+                Token::Frequency(Daily),
+                Token::TimeOfDay(NaiveTime::from_hms_opt(9, 30, 0).unwrap())
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("daily at 9:30pm")),
+            Ok(vec![
+                Token::Frequency(Daily),
+                Token::TimeOfDay(NaiveTime::from_hms_opt(21, 30, 0).unwrap())
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("daily at 16:30")),
+            Ok(vec![
+                Token::Frequency(Daily),
+                Token::TimeOfDay(NaiveTime::from_hms_opt(16, 30, 0).unwrap())
+            ])
+        );
+    }
+
+    #[test]
+    fn token_every_x_period() {
+        assert_eq!(
+            tokenize(&normalize("every other day")),
+            Ok(vec![Interval(2), Frequency(Daily)])
+        );
+
+        assert_eq!(
+            tokenize(&normalize("every 3 weeks")),
+            Ok(vec![Interval(3), Frequency(Weekly)])
+        );
+
+        assert_eq!(
+            tokenize(&normalize("quarterly")),
+            Ok(vec![Interval(3), Frequency(Monthly)])
+        );
+
+        assert_eq!(
+            tokenize(&normalize("semiannually")),
+            Ok(vec![Interval(6), Frequency(Monthly)])
+        );
+    }
+
+    #[test]
+    fn token_weekdays() {
+        assert_eq!(
+            tokenize(&normalize("weekly on monday")),
+            Ok(vec![Frequency(Weekly), Weekday(Monday)])
+        );
+        assert_eq!(
+            tokenize(&normalize("every other tuesday")),
+            Ok(vec![Interval(2), Weekday(Tuesday)])
+        );
+        assert_eq!(
+            tokenize(&normalize("weekdays")),
+            Ok(vec![WeekdaySet(Weekdays)])
+        );
+        assert_eq!(
+            tokenize(&normalize("weekends")),
+            Ok(vec![WeekdaySet(Weekend)])
+        );
+        assert_eq!(
+            tokenize(&normalize("weekly on friday, saturday, monday")),
+            Ok(vec![
+                Frequency(Weekly),
+                Weekday(Friday),
+                Weekday(Saturday),
+                Weekday(Monday)
+            ])
+        );
+    }
+
+    #[test]
+    fn token_months() {
+        assert_eq!(tokenize(&normalize("jan")), Ok(vec![Month(January)]));
+        assert_eq!(tokenize(&normalize("feb")), Ok(vec![Month(February)]));
+        assert_eq!(tokenize(&normalize("mar")), Ok(vec![Month(March)]));
+        assert_eq!(tokenize(&normalize("apr")), Ok(vec![Month(April)]));
+        assert_eq!(tokenize(&normalize("may")), Ok(vec![Month(May)]));
+        assert_eq!(tokenize(&normalize("jun")), Ok(vec![Month(June)]));
+        assert_eq!(tokenize(&normalize("jul")), Ok(vec![Month(July)]));
+        assert_eq!(tokenize(&normalize("aug")), Ok(vec![Month(August)]));
+        assert_eq!(tokenize(&normalize("sep")), Ok(vec![Month(September)]));
+        assert_eq!(tokenize(&normalize("oct")), Ok(vec![Month(October)]));
+        assert_eq!(tokenize(&normalize("nov")), Ok(vec![Month(November)]));
+        assert_eq!(tokenize(&normalize("dec")), Ok(vec![Month(December)]));
+    }
+
+    #[test]
+    fn token_twice_a() {
+        assert_eq!(
+            Err(ParseError::UnsupportedPattern("twice a week".into())),
+            tokenize(&normalize("twice a week"))
+        );
+        assert_eq!(
+            Err(ParseError::UnsupportedPattern("twice a month".into())),
+            tokenize(&normalize("twice a month"))
+        );
+        assert_eq!(
+            tokenize(&normalize("twice a year")),
+            Ok(vec![Interval(6), Frequency(Monthly)])
+        );
+    }
+
+    #[test]
+    fn token_combined_real_inputs() {
+        assert_eq!(
+            tokenize(&normalize("Every Mon, Wed, and Fri.")),
+            Ok(vec![Weekday(Monday), Weekday(Wednesday), Weekday(Friday),])
+        );
+        assert_eq!(
+            tokenize(&normalize("every other week on mon")),
+            Ok(vec![Interval(2), Frequency(Weekly), Weekday(Monday)])
+        );
+        assert_eq!(
+            tokenize(&normalize("every 3rd month on the 4th")),
+            Ok(vec![Interval(3), Frequency(Monthly), MonthDay(4)])
+        );
+        assert_eq!(
+            tokenize(&normalize("every last fri of the month")),
+            Ok(vec![
+                OrdinalPosition(-1),
+                Weekday(Friday),
+                Frequency(Monthly)
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("every 2nd of the month")),
+            Ok(vec![MonthDay(2), Frequency(Monthly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("Fortnightly on Tues")),
+            Ok(vec![Interval(2), Frequency(Weekly), Weekday(Tuesday)])
+        );
+        assert_eq!(
+            tokenize(&normalize("weekly on thursday three times")),
+            Ok(vec![Frequency(Weekly), Weekday(Thursday), Count(3)])
+        );
+        assert_eq!(
+            tokenize(&normalize("every day until March 6th, 2027")),
+            Ok(vec![
+                Frequency(Daily),
+                UntilDate(NaiveDate::from_ymd_opt(2027, 3, 6).unwrap())
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("every 2nd wednesday of the month")),
+            Ok(vec![
+                OrdinalPosition(2),
+                Weekday(Wednesday),
+                Frequency(Monthly)
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("monthly on the third friday")),
+            Ok(vec![
+                Frequency(Monthly),
+                OrdinalPosition(3),
+                Weekday(Friday),
+            ])
+        );
+    }
 }

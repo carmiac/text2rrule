@@ -1,15 +1,14 @@
 use chrono::{NaiveDate, NaiveTime};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FreqWord {
     Daily,
     Weekly,
     Monthly,
-    Quarterly,
     Yearly,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Weekday {
     Monday,
     Tuesday,
@@ -20,13 +19,13 @@ pub enum Weekday {
     Sunday,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DaySet {
     Weekdays, // Monday-Friday
     Weekend,  // Saturday-Sunday
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Month {
     January,
     February,
@@ -42,16 +41,35 @@ pub enum Month {
     December,
 }
 
-#[derive(Debug)]
+impl Month {
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            Month::January => 1,
+            Month::February => 2,
+            Month::March => 3,
+            Month::April => 4,
+            Month::May => 5,
+            Month::June => 6,
+            Month::July => 7,
+            Month::August => 8,
+            Month::September => 9,
+            Month::October => 10,
+            Month::November => 11,
+            Month::December => 12,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Token {
     Frequency(FreqWord),  // "daily", "weekly", "monthly", "yearly"
-    Interval(u32),        // "every 3", "every other" (= 2)
+    Interval(i32),        // "every 3", "every other" (= 2)
     Weekday(Weekday),     // "monday", "tuesday", ...
     WeekdaySet(DaySet),   // "weekdays", "weekends"
     MonthDay(u8),         // "the 15th", "on the 1st"
     Month(Month),         // "january", "march", ...
-    OrdinalPosition(i8),  // "first", "last", "third" (for "third tuesday")
+    OrdinalPosition(i32), // "first", "last", "third" (for "third tuesday")
     UntilDate(NaiveDate), // "until march 1st"
     Count(u32),           // "5 times", "3 occurrences"
-    TimeOfDay(NaiveTime), // optional, if you want BYHOUR support
+    TimeOfDay(NaiveTime), // "11:30am", "16:00"
 }
