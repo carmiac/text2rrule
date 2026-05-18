@@ -27,6 +27,9 @@ pub fn normalize(input: &str) -> String {
     // Multi-word shorthands.
     let s = s.replace("ĉiun alian", "ĉiu 2");
     let s = s.replace("ĉiu alia", "ĉiu 2");
+    // bare-ASCII equivalents of the same phrases
+    let s = s.replace("ciun alian", "ĉiu 2");
+    let s = s.replace("ciu alia", "ĉiu 2");
 
     // Per-word loop.
     let mut result: Vec<String> = Vec::new();
@@ -45,6 +48,10 @@ pub fn normalize(input: &str) -> String {
         }
 
         let w: &str = match word {
+            // Bare-ASCII "every" (x-system cxiu/cxiun already folded above).
+            "ciu" => "ĉiu",
+            "ciun" => "ĉiun",
+
             // Frequency adverbs (accented + bare-ASCII; x-system already folded above).
             "ĉiutage" | "ciutage" => "ĉiu tago",
             "ĉiusemajne" | "ciusemajne" => "ĉiu semajno",
@@ -145,8 +152,213 @@ fn strip_ordinal_a(w: &str) -> &str {
     w
 }
 
-pub fn tokenize(_input: &str) -> Result<Vec<Token>, ParseError> {
-    todo!()
+/// Turn a normalized Esperanto string into a vector of tokens.
+pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
+    use crate::token::DaySet::*;
+    use crate::token::FreqWord::*;
+    use crate::token::Month::*;
+    use crate::token::Weekday::*;
+    use chrono::{NaiveDate, NaiveTime};
+    use Token::*;
+
+    let mut tokens: Vec<Token> = Vec::new();
+
+    let mut twice = false;
+    let mut the_context = false;
+    let mut month_context = false;
+    let mut of_context = false;
+    let mut until = false;
+    let mut until_month: Option<u32> = None;
+    let mut until_day: Option<u32> = None;
+
+    for word in input.split_whitespace() {
+        let token: Option<Token> = match word {
+            // Frequencies.
+            "tago" => Some(Frequency(Daily)),
+            "semajno" => Some(Frequency(Weekly)),
+            "monato" => Some(Frequency(Monthly)),
+            "jaro" => Some(Frequency(Yearly)),
+
+            // Weekdays.
+            "lundo" => Some(Weekday(Monday)),
+            "mardo" => Some(Weekday(Tuesday)),
+            "merkredo" => Some(Weekday(Wednesday)),
+            "ĵaŭdo" => Some(Weekday(Thursday)),
+            "vendredo" => Some(Weekday(Friday)),
+            "sabato" => Some(Weekday(Saturday)),
+            "dimanĉo" => Some(Weekday(Sunday)),
+            "labortagoj" => Some(WeekdaySet(Weekdays)),
+            "semajnfino" => Some(WeekdaySet(Weekend)),
+
+            // Months.
+            "januaro" => Some(Month(January)),
+            "februaro" => Some(Month(February)),
+            "marto" => Some(Month(March)),
+            "aprilo" => Some(Month(April)),
+            "majo" => Some(Month(May)),
+            "junio" => Some(Month(June)),
+            "julio" => Some(Month(July)),
+            "aŭgusto" => Some(Month(August)),
+            "septembro" => Some(Month(September)),
+            "oktobro" => Some(Month(October)),
+            "novembro" => Some(Month(November)),
+            "decembro" => Some(Month(December)),
+
+            // Filler words.
+            "ĉiu" | "ĉiun" | "je" | "en" | "po" | "kaj" => continue,
+
+            "la" => {
+                the_context = true;
+                continue;
+            }
+
+            "de" => {
+                of_context = true;
+                continue;
+            }
+
+            "ĝis" => {
+                until = true;
+                continue;
+            }
+
+            "dufoje" => {
+                twice = true;
+                continue;
+            }
+
+            // "N foje" → Count(N): rewrite the last Interval.
+            "foje" => {
+                if let Some(Interval(n)) = tokens.last().copied() {
+                    *tokens.last_mut().unwrap() = Count(n);
+                }
+                continue;
+            }
+
+            // Numbers.
+            s if let Ok(n) = s.parse::<i32>() => {
+                if n < 0 {
+                    Some(OrdinalPosition(n))
+                } else if the_context {
+                    the_context = false;
+                    Some(MonthDay(n as u8))
+                } else if month_context && !until {
+                    month_context = false;
+                    Some(MonthDay(n as u8))
+                } else {
+                    Some(Interval(n as u32))
+                }
+            }
+
+            // Times.
+            s if is_time(s) => {
+                if let Ok(t) = NaiveTime::parse_from_str(s, "%H:%M") {
+                    Some(TimeOfDay(t))
+                } else if let Ok(t) = NaiveTime::parse_from_str(s, "%I:%M%P") {
+                    Some(TimeOfDay(t))
+                } else {
+                    return Err(ParseError::UnrecognizedInput(format!(
+                        "unrecognized time: {s}"
+                    )));
+                }
+            }
+
+            _ => {
+                return Err(ParseError::UnrecognizedInput(format!(
+                    "unrecognized word: {word}"
+                )))
+            }
+        };
+
+        if let Some(token) = token {
+            // "dufoje jaro" special case: only twice-yearly is supported.
+            if twice {
+                if token == Frequency(Yearly) {
+                    tokens.push(Interval(6));
+                    tokens.push(Frequency(Monthly));
+                    continue;
+                } else {
+                    return Err(ParseError::UnsupportedPattern(input.into()));
+                }
+            }
+
+            // Collect tokens for "ĝis <Month> <day> <year>".
+            if until {
+                match &token {
+                    Month(m) => {
+                        until_month = Some(m.as_u32());
+                        continue;
+                    }
+                    Interval(n) if until_month.is_some() && until_day.is_none() => {
+                        until_day = Some(*n);
+                        continue;
+                    }
+                    Interval(n) if until_month.is_some() && until_day.is_some() => {
+                        let date = NaiveDate::from_ymd_opt(
+                            *n as i32,
+                            until_month.unwrap(),
+                            until_day.unwrap(),
+                        )
+                        .ok_or_else(|| {
+                            ParseError::UnrecognizedInput("invalid until date".into())
+                        })?;
+                        tokens.push(UntilDate(date));
+                        until = false;
+                        until_month = None;
+                        until_day = None;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            // "la N <weekday>": MonthDay followed by Weekday means it was OrdinalPosition.
+            if let Weekday(_) = &token {
+                if let Some(MonthDay(n)) = tokens.last().copied() {
+                    *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
+                }
+            }
+
+            // "N de la monato" / "N <weekday> de la monato": fix preceding Interval.
+            if of_context {
+                if let Frequency(_) = &token {
+                    let len = tokens.len();
+                    if len >= 2 {
+                        if let (Interval(n), Weekday(_)) = (tokens[len - 2], tokens[len - 1]) {
+                            tokens[len - 2] = OrdinalPosition(n as i32);
+                        }
+                    } else if let Some(Interval(n)) = tokens.last().copied() {
+                        *tokens.last_mut().unwrap() = MonthDay(n as u8);
+                    }
+                    of_context = false;
+                }
+            }
+
+            if matches!(token, Month(_)) {
+                month_context = true;
+            }
+            tokens.push(token);
+        }
+    }
+
+    Ok(tokens)
+}
+
+fn is_time(s: &str) -> bool {
+    let s = s
+        .strip_suffix("am")
+        .or_else(|| s.strip_suffix("pm"))
+        .unwrap_or(s);
+    let mut parts = s.splitn(2, ':');
+    match (parts.next(), parts.next()) {
+        (Some(h), Some(m)) => {
+            matches!(h.len(), 1..=2)
+                && m.len() == 2
+                && h.chars().all(|c| c.is_ascii_digit())
+                && m.chars().all(|c| c.is_ascii_digit())
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -337,6 +549,188 @@ mod tests {
         assert_eq!(
             normalize("ĉiutage ĝis marto 6 2027"),
             "ĉiu tago ĝis marto 6 2027"
+        );
+    }
+
+    use crate::token::DaySet::*;
+    use crate::token::FreqWord::*;
+    use crate::token::Month::*;
+    use crate::token::Weekday::*;
+    use chrono::{NaiveDate, NaiveTime};
+    use Token::*;
+
+    #[test]
+    fn token_frequency() {
+        assert_eq!(tokenize(&normalize("ĉiutage")), Ok(vec![Frequency(Daily)]));
+        assert_eq!(
+            tokenize(&normalize("ĉiusemajne")),
+            Ok(vec![Frequency(Weekly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiumonate")),
+            Ok(vec![Frequency(Monthly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiujare")),
+            Ok(vec![Frequency(Yearly)])
+        );
+    }
+
+    #[test]
+    fn token_time() {
+        assert_eq!(
+            tokenize(&normalize("ĉiutage je la 9:30")),
+            Ok(vec![
+                Frequency(Daily),
+                TimeOfDay(NaiveTime::from_hms_opt(9, 30, 0).unwrap())
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiutage je 16:30")),
+            Ok(vec![
+                Frequency(Daily),
+                TimeOfDay(NaiveTime::from_hms_opt(16, 30, 0).unwrap())
+            ])
+        );
+    }
+
+    #[test]
+    fn token_every_x_period() {
+        assert_eq!(
+            tokenize(&normalize("ĉiun alian tagon")),
+            Ok(vec![Interval(2), Frequency(Daily)])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiun trian semajnon")),
+            Ok(vec![Interval(3), Frequency(Weekly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("kvaronjare")),
+            Ok(vec![Interval(3), Frequency(Monthly)])
+        );
+        assert_eq!(
+            tokenize(&normalize("duonjare")),
+            Ok(vec![Interval(6), Frequency(Monthly)])
+        );
+    }
+
+    #[test]
+    fn token_weekdays() {
+        assert_eq!(
+            tokenize(&normalize("ĉiusemajne lunde")),
+            Ok(vec![Frequency(Weekly), Weekday(Monday)])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiun alian mardon")),
+            Ok(vec![Interval(2), Weekday(Tuesday)])
+        );
+        assert_eq!(
+            tokenize(&normalize("labortage")),
+            Ok(vec![WeekdaySet(Weekdays)])
+        );
+        assert_eq!(
+            tokenize(&normalize("semajnfine")),
+            Ok(vec![WeekdaySet(Weekend)])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiusemajne vendrede, sabate, lunde")),
+            Ok(vec![
+                Frequency(Weekly),
+                Weekday(Friday),
+                Weekday(Saturday),
+                Weekday(Monday)
+            ])
+        );
+    }
+
+    #[test]
+    fn token_months() {
+        assert_eq!(
+            tokenize(&normalize("januaro")),
+            Ok(vec![Token::Month(January)])
+        );
+        assert_eq!(
+            tokenize(&normalize("aŭgusto")),
+            Ok(vec![Token::Month(August)])
+        );
+        assert_eq!(
+            tokenize(&normalize("auxgusto")),
+            Ok(vec![Token::Month(August)])
+        );
+        assert_eq!(
+            tokenize(&normalize("augusto")),
+            Ok(vec![Token::Month(August)])
+        );
+    }
+
+    #[test]
+    fn token_month_followed_by_day() {
+        assert_eq!(
+            tokenize(&normalize("junio 1")),
+            Ok(vec![Token::Month(June), MonthDay(1)])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiujare je la 1a de junio")),
+            Ok(vec![Frequency(Yearly), MonthDay(1), Token::Month(June)])
+        );
+    }
+
+    #[test]
+    fn token_twice_a() {
+        assert_eq!(
+            tokenize(&normalize("dufoje en jaro")),
+            Ok(vec![Interval(6), Frequency(Monthly)])
+        );
+        assert!(matches!(
+            tokenize(&normalize("dufoje en semajno")),
+            Err(ParseError::UnsupportedPattern(_))
+        ));
+    }
+
+    #[test]
+    fn token_count() {
+        assert_eq!(
+            tokenize(&normalize("ĉiusemajne ĵaŭde tri foje")),
+            Ok(vec![Frequency(Weekly), Weekday(Thursday), Count(3)])
+        );
+    }
+
+    #[test]
+    fn token_until() {
+        assert_eq!(
+            tokenize(&normalize("ĉiutage ĝis marto 6 2027")),
+            Ok(vec![
+                Frequency(Daily),
+                UntilDate(NaiveDate::from_ymd_opt(2027, 3, 6).unwrap())
+            ])
+        );
+    }
+
+    #[test]
+    fn token_ordinal_position() {
+        assert_eq!(
+            tokenize(&normalize("ĉiumonate je la tria vendredo")),
+            Ok(vec![
+                Frequency(Monthly),
+                OrdinalPosition(3),
+                Weekday(Friday),
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiun lastan vendredon de la monato")),
+            Ok(vec![
+                OrdinalPosition(-1),
+                Weekday(Friday),
+                Frequency(Monthly)
+            ])
+        );
+        assert_eq!(
+            tokenize(&normalize("ĉiun duan vendredon de la monato")),
+            Ok(vec![
+                OrdinalPosition(2),
+                Weekday(Friday),
+                Frequency(Monthly)
+            ])
         );
     }
 }
