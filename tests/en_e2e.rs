@@ -2,7 +2,7 @@
 //!
 //! Each case runs the full pipeline with the locale forced to "en".
 
-use text2rrule::{text2rrule_with_locale, ParseError};
+use text2rrule::{ParseError, text2rrule_with_locale};
 
 fn en(input: &str) -> Result<String, ParseError> {
     text2rrule_with_locale(input, ["en".to_string()].into_iter())

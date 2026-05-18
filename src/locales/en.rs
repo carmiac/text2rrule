@@ -249,7 +249,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             _ => {
                 return Err(ParseError::UnrecognizedInput(format!(
                     "unrecognized word: {word}"
-                )))
+                )));
             }
         };
 
@@ -353,8 +353,8 @@ mod tests {
     use crate::token::FreqWord::*;
     use crate::token::Month::*;
     use crate::token::Weekday::*;
-    use chrono::{NaiveDate, NaiveTime};
     use Token::*;
+    use chrono::{NaiveDate, NaiveTime};
 
     #[test]
     fn lowercase() {

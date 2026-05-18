@@ -1,7 +1,6 @@
 mod emit;
-mod en;
-mod eo;
 pub mod error;
+mod locales;
 mod parser;
 mod pattern;
 mod token;
@@ -24,12 +23,12 @@ pub fn text2rrule(input: &str) -> Result<String, ParseError> {
 /// Attempts to find the best locale match, with fallback to English if it can't be determined.
 pub fn text2rrule_with_locale(
     input: &str,
-    locales: impl Iterator<Item = String>,
+    locales: impl IntoIterator<Item = String>,
 ) -> Result<String, ParseError> {
     debug!("Input: {:?}", input);
-    let locales: Vec<String> = locales.collect();
+    let locales: Vec<String> = locales.into_iter().collect();
     debug!("Locales: {:?}", locales);
-    let parser = Parser::get_parser(locales.into_iter()).unwrap_or(Parser::En);
+    let parser = Parser::get_parser(locales).unwrap_or(Parser::En);
     debug!("Parser: {:?}", parser);
 
     let normalized = parser.normalize(input);

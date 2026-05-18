@@ -61,6 +61,95 @@ pub enum RecurrencePattern {
     },
 }
 
+fn first_freq(tokens: &[Token]) -> Option<FreqWord> {
+    tokens.iter().find_map(|t| {
+        if let Token::Frequency(f) = t {
+            Some(*f)
+        } else {
+            None
+        }
+    })
+}
+
+fn first_month(tokens: &[Token]) -> Option<Month> {
+    tokens.iter().find_map(|t| {
+        if let Token::Month(m) = t {
+            Some(*m)
+        } else {
+            None
+        }
+    })
+}
+
+fn first_weekday(tokens: &[Token]) -> Option<Weekday> {
+    tokens.iter().find_map(|t| {
+        if let Token::Weekday(w) = t {
+            Some(*w)
+        } else {
+            None
+        }
+    })
+}
+
+fn first_weekday_set(tokens: &[Token]) -> Option<DaySet> {
+    tokens.iter().find_map(|t| {
+        if let Token::WeekdaySet(s) = t {
+            Some(*s)
+        } else {
+            None
+        }
+    })
+}
+
+fn first_position(tokens: &[Token]) -> Option<i8> {
+    tokens.iter().find_map(|t| {
+        if let Token::OrdinalPosition(p) = t {
+            Some(*p as i8)
+        } else {
+            None
+        }
+    })
+}
+
+fn interval_or_1(tokens: &[Token]) -> u32 {
+    tokens
+        .iter()
+        .find_map(|t| {
+            if let Token::Interval(n) = t {
+                Some(*n)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(1)
+}
+
+fn all_monthdays(tokens: &[Token]) -> Vec<u8> {
+    tokens
+        .iter()
+        .filter_map(|t| {
+            if let Token::MonthDay(d) = t {
+                Some(*d)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn all_weekdays(tokens: &[Token]) -> Vec<Weekday> {
+    tokens
+        .iter()
+        .filter_map(|t| {
+            if let Token::Weekday(w) = t {
+                Some(*w)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Takes a Vec<Token> produced by tokenize() and converts it into a RecurrencePattern.
 ///
 /// Any modifier tokens (UntilDate, Count, TimeOfDay) are extracted into a Modifiers struct.
@@ -98,6 +187,9 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
     let required = |ts: &[TokenTag]| ts.iter().all(|t| tags.contains(t));
     let excluded = |ts: &[TokenTag]| ts.iter().all(|t| !tags.contains(t));
 
+    let missing =
+        |what: &str| ParseError::UnsupportedPattern(format!("missing {}: {:?}", what, tokens));
+
     // Simple -> Freqency and optionaly an Interval and TimeOfDay
     if required(&[TokenTag::Frequency])
         && excluded(&[
@@ -108,29 +200,8 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
             TokenTag::OrdinalPosition,
         ])
     {
-        let freq = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Frequency(f) = t {
-                    Some(*f)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing frequency: {:?}", tokens))
-            })?;
-
-        let interval = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Interval(n) = t {
-                    Some(*n)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(1);
+        let freq = first_freq(&tokens).ok_or_else(|| missing("frequency"))?;
+        let interval = interval_or_1(&tokens);
         return Ok((RecurrencePattern::Simple { freq, interval }, modifiers));
     }
 
@@ -143,28 +214,8 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
             TokenTag::OrdinalPosition,
         ])
     {
-        let set = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::WeekdaySet(s) = t {
-                    Some(*s)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing weekday set: {:?}", tokens))
-            })?;
-        let interval = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Interval(n) = t {
-                    Some(*n)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(1);
+        let set = first_weekday_set(&tokens).ok_or_else(|| missing("weekday set"))?;
+        let interval = interval_or_1(&tokens);
         return Ok((RecurrencePattern::WeekdaySet { set, interval }, modifiers));
     }
 
@@ -177,26 +228,8 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
             TokenTag::OrdinalPosition,
         ])
     {
-        let days: Vec<Weekday> = tokens
-            .iter()
-            .filter_map(|t| {
-                if let Token::Weekday(d) = t {
-                    Some(*d)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let interval = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Interval(n) = t {
-                    Some(*n)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(1);
+        let days = all_weekdays(&tokens);
+        let interval = interval_or_1(&tokens);
         return Ok((RecurrencePattern::ByWeekday { days, interval }, modifiers));
     }
 
@@ -209,26 +242,8 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
             TokenTag::OrdinalPosition,
         ])
     {
-        let days: Vec<u8> = tokens
-            .iter()
-            .filter_map(|t| {
-                if let Token::MonthDay(d) = t {
-                    Some(*d)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let interval = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Interval(n) = t {
-                    Some(*n)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(1);
+        let days = all_monthdays(&tokens);
+        let interval = interval_or_1(&tokens);
         return Ok((
             RecurrencePattern::MonthlyByDay { interval, days },
             modifiers,
@@ -243,28 +258,8 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
             TokenTag::OrdinalPosition,
         ])
     {
-        let month = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Month(m) = t {
-                    Some(*m)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing month: {:?}", tokens))
-            })?;
-        let days: Vec<u8> = tokens
-            .iter()
-            .filter_map(|t| {
-                if let Token::MonthDay(d) = t {
-                    Some(*d)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let month = first_month(&tokens).ok_or_else(|| missing("month"))?;
+        let days = all_monthdays(&tokens);
         return Ok((RecurrencePattern::YearlyByMonth { month, days }, modifiers));
     }
 
@@ -276,42 +271,9 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
         TokenTag::Frequency,
     ]) && excluded(&[TokenTag::WeekdaySet, TokenTag::MonthDay])
     {
-        let month = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Month(m) = t {
-                    Some(*m)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing month: {:?}", tokens))
-            })?;
-        let pos = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::OrdinalPosition(p) = t {
-                    Some(*p as i8)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing ordinal position: {:?}", tokens))
-            })?;
-        let weekday = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Weekday(w) = t {
-                    Some(*w)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing weekday: {:?}", tokens))
-            })?;
+        let month = first_month(&tokens).ok_or_else(|| missing("month"))?;
+        let pos = first_position(&tokens).ok_or_else(|| missing("ordinal position"))?;
+        let weekday = first_weekday(&tokens).ok_or_else(|| missing("weekday"))?;
         return Ok((
             RecurrencePattern::YearlyByPosition {
                 month,
@@ -329,40 +291,9 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
         TokenTag::Frequency,
     ]) && excluded(&[TokenTag::WeekdaySet, TokenTag::MonthDay, TokenTag::Month])
     {
-        let pos = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::OrdinalPosition(p) = t {
-                    Some(*p as i8)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing ordinal position: {:?}", tokens))
-            })?;
-        let weekday = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Weekday(w) = t {
-                    Some(*w)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ParseError::UnsupportedPattern(format!("missing weekday: {:?}", tokens))
-            })?;
-        let interval = tokens
-            .iter()
-            .find_map(|t| {
-                if let Token::Interval(n) = t {
-                    Some(*n)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(1);
+        let pos = first_position(&tokens).ok_or_else(|| missing("ordinal position"))?;
+        let weekday = first_weekday(&tokens).ok_or_else(|| missing("weekday"))?;
+        let interval = interval_or_1(&tokens);
         return Ok((
             RecurrencePattern::MonthlyByPosition {
                 interval,
@@ -385,7 +316,7 @@ mod tests {
         ByWeekday, MonthlyByDay, MonthlyByPosition, Simple, WeekdaySet, YearlyByMonth,
         YearlyByPosition,
     };
-    use crate::pattern::{patternize, Modifiers};
+    use crate::pattern::{Modifiers, patternize};
     use crate::token::DaySet::*;
     use crate::token::FreqWord::*;
     use crate::token::Month::*;

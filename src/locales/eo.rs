@@ -158,8 +158,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
     use crate::token::FreqWord::*;
     use crate::token::Month::*;
     use crate::token::Weekday::*;
-    use chrono::{NaiveDate, NaiveTime};
     use Token::*;
+    use chrono::{NaiveDate, NaiveTime};
 
     let mut tokens: Vec<Token> = Vec::new();
 
@@ -266,7 +266,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             _ => {
                 return Err(ParseError::UnrecognizedInput(format!(
                     "unrecognized word: {word}"
-                )))
+                )));
             }
         };
 
@@ -556,8 +556,8 @@ mod tests {
     use crate::token::FreqWord::*;
     use crate::token::Month::*;
     use crate::token::Weekday::*;
-    use chrono::{NaiveDate, NaiveTime};
     use Token::*;
+    use chrono::{NaiveDate, NaiveTime};
 
     #[test]
     fn token_frequency() {
@@ -570,10 +570,7 @@ mod tests {
             tokenize(&normalize("ĉiumonate")),
             Ok(vec![Frequency(Monthly)])
         );
-        assert_eq!(
-            tokenize(&normalize("ĉiujare")),
-            Ok(vec![Frequency(Yearly)])
-        );
+        assert_eq!(tokenize(&normalize("ĉiujare")), Ok(vec![Frequency(Yearly)]));
     }
 
     #[test]
