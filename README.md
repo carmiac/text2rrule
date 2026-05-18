@@ -1,84 +1,139 @@
 # text2rrule
 
-This crate provides a way to convert plain language descriptions of recurring dates and times to RFC 5545 recurrence rules.
+A Rust crate that converts plain-language descriptions of recurring events into [RFC 5545](https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.10) RRULE strings.
 
-## Architecture Overview
+```text
+"every two weeks on friday"      ->  FREQ=WEEKLY;INTERVAL=2;BYDAY=FR
+"monthly on the third friday"    ->  FREQ=MONTHLY;BYDAY=3FR
+"every weekday at 9:30am"        ->  FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=30
+```
 
-The core idea is a pipeline: raw string -> normalize -> tokenize -> parse intent -> build RRule
+Still a pre-1.0 work in progress, though the API is unlikely to change much.
 
-The normalize and tokenize steps are unique for each language, but after tokenization the steps are the same.
+## Install
 
-### Stage 1: Normalization
+```toml
+[dependencies]
+text2rrule = { git = "https://github.com/carmiac/text2rrule" }
+```
 
-Before any real parsing, clean the input:
+## Usage
 
-lowercase, strip punctuation (commas, periods), expand contractions/abbreviations: "mon" -> "monday", "wkdy" -> "weekday" normalize numbers: "third" -> 3, "every 2nd" -> "every 2"
+```rust
+use text2rrule::text2rrule;
 
-### Stage 2: Tokenization
+let rrule = text2rrule("every two weeks on friday")?;
+assert_eq!(rrule, "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR");
+```
 
-Scan the normalized string into a vector semantic tokens. Something like:
+By default the locale is detected from the environment, with English as the fallback. To force a locale:
+
+```rust
+use text2rrule::text2rrule_with_locale;
+
+let rrule = text2rrule_with_locale(
+    "every two weeks on friday",
+    ["en".to_string()].into_iter(),
+)?;
+```
+
+## Supported Recurrence Phrases in English
+
+| Input | RRULE |
+| --- | --- |
+| `daily`, `weekly`, `monthly`, `yearly` | `FREQ=DAILY`, etc... |
+| `every 3 weeks`, `every other day` | `FREQ=WEEKLY;INTERVAL=3`, `FREQ=DAILY;INTERVAL=2` |
+| `fortnightly`, `quarterly`, `semiannually`, `annually` | shorthand for the obvious intervals |
+| `every monday and wednesday` | `FREQ=WEEKLY;BYDAY=MO,WE` |
+| `every weekday`, `weekends` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR` , etc... |
+| `monthly on the 15th`, `the 1st and 15th of every month` | `FREQ=MONTHLY;BYMONTHDAY=15`, `BYMONTHDAY=1,15` |
+| `monthly on the third friday`, `every last friday of the month` | `FREQ=MONTHLY;BYDAY=3FR`, `BYDAY=-1FR` |
+| `every year on the 1st of june` | `FREQ=YEARLY;BYMONTH=6;BYMONTHDAY=1` |
+| `every year on the last monday of may` | `FREQ=YEARLY;BYMONTH=5;BYDAY=-1MO` |
+| `weekly on thursday three times` | `FREQ=WEEKLY;BYDAY=TH;COUNT=3` |
+| `every day until March 6th, 2027` | `FREQ=DAILY;UNTIL=20270306` |
+| `daily at 9:30am` | `FREQ=DAILY;BYHOUR=9;BYMINUTE=30` |
+
+Common abbreviations and misspellings are handled (`mon`/`tues`/`wed`, `jan`/`feb`, `wkdy`, `wknd`, `wednsday`, `anually`, etc).
+
+See `tests/en_e2e.rs` for the full set of tested inputs.
+
+## Example CLI
+
+A small example binary is included for trying inputs interactively:
+
+```bash
+cargo run --example text2rrule -- "every two weeks on friday"
+cargo run --example text2rrule -- -v "every monday"          # verbose tracing
+cargo run --example text2rrule -- -l en-us "every monday"    # force locale
+```
+
+With no input argument, it reads one line from stdin.
+
+## Internationalization
+
+This crate is designed to support multiple languages. However, I am only fluent enough in English and Esperanto to implement them. If you would like to help by adding a new language, see [##Contributing].
+
+## Architecture
+
+The pipeline has four stages:
+
+input -> normalize -> tokenize -> patternize -> emit -> RRULE
+
+normalize and tokenize are per-locale, while patternize and emit are generic.
+
+1. Normalize - Normalize the input: lowercase, strip punctuation, expand contractions and shorthands.
+2. Tokenize - Turn the normalized string into a `Vec<Token>`:
 
 ```rust
 enum Token {
-Frequency(FreqWord), // "daily", "weekly", "monthly", "yearly"
-Interval(u32), // "every 3", "every other" (= 2)
-Weekday(Weekday), // "monday", "sunday", etc
-Until(NaiveDate), // 'until march 3"
-Count(u32),
-etc...
+    Frequency(FreqWord),    // "daily", "weekly", "monthly", "yearly"
+    Interval(u32),          // "every 3"
+    Weekday(Weekday),       // "monday", "sunday"
+    WeekdaySet(DaySet),     // "weekdays", "weekends"
+    MonthDay(u8),           // "the 15th"
+    Month(Month),
+    OrdinalPosition(i32),   // "first", "last" (-1), "third"
+    UntilDate(NaiveDate),
+    Count(u32),
+    TimeOfDay(NaiveTime),
 }
 ```
 
-### Stage 3: Intent
-
-Pattern match the Vec<Token> against known recurrence styles:
+3. Patternize - Match the token set against known patterns:
 
 ```rust
-enum RecurrencePattern { Simple { freq: Freq, interval: u32 }, // "every 2 weeks"
-
-    ByWeekday { freq: Freq, interval: u32, days: Vec<Weekday> },
-    // "every monday and wednesday"
-
-    WeekdaySet { set: DaySet },
-    // "every weekday", "every weekend"
-
-    MonthlyByDay { interval: u32, day: u8 },
-    // "monthly on the 15th"
-
-    MonthlyByPosition { interval: u32, pos: i8, weekday: Weekday },
-    // "monthly on the third tuesday"
-
-    YearlyByMonth { month: Month, day: u8 },
-    // "every year on june 1st"
-
-    etc...
+enum RecurrencePattern {
+    Simple             { freq, interval },
+    ByWeekday          { days, interval },
+    WeekdaySet         { set, interval },
+    MonthlyByDay       { interval, days },
+    MonthlyByPosition  { interval, pos, weekday },
+    YearlyByMonth      { month, days },
+    YearlyByPosition   { month, pos, weekday },
 }
 ```
 
-### Stage 4: RRule Emission
+Any `UntilDate`, `Count`, or `TimeOfDay` tokens are pulled into a separate `Modifiers` struct that attaches to any pattern.
 
-Each RecurrencePattern maps mechanically to an RRule string:
+4. Emit - Turn a `(RecurrencePattern, Modifiers)` pair into an RRULE string.
 
-```rust
-fn emit_rrule(pattern: RecurrencePattern, modifiers: Modifiers) -> String
-```
+## Contributing
 
-Where Modifiers holds optional UNTIL, COUNT, BYHOUR etc. that can be attached to any pattern.
+Example phrases and PRs welcome! In particular, I'd love to get more languages/locales supported.
 
-## Error Handling Strategy
+### Adding a Locale
 
-This crate tries to catch malformed input early and will return a ParseError with a reason string.
+1. Create `src/<code>.rs` exposing `pub fn normalize(&str) -> String` and `pub fn tokenize(&str) -> Result<Vec<Token>, ParseError>`. Use `src/en.rs` as the reference.
+2. In `src/lib.rs`, add `mod <code>;`.
+3. In `src/parser.rs`, add a variant to the `Parser` enum and add it into `Parser::get_parser`, `Parser::normalize`, and `Parser::tokenize`.
+4. Add tests for representative phrases. See `tests/en_e2e.rs` for end-to-end coverage.
 
-## Language Support
-
-Multiple languages are supported and PRs are happily accepted for more. To add a new language:
-
-1. Add the locale entries in parser.rs: The Parser enum, get_locales(), Parser::normalize(), and Parser::tokenize()
-1. Create a new locale file with pub fn's normalize and tokenize. Look at en.rs for an example.
-1. Add plenty of tests for how such phrases are expressed in the target language.
+The patternize and emit stages are locale-agnostic, a new locale only needs to produce the same `Vec<Token>` that the English tokenizer does.
 
 ## References
 
-- Example tests from a python library: https://github.com/kvh/recurrent/blob/master/src/recurrent/test.py
-- Rust rrule parser - https://github.com/fmeringdal/rust-rrule
-- javascript library: https://github.com/jkbrzt/rrule/tree/master
+- RFC 5545 § 3.3.10 — RRULE grammar
+- [rust-rrule](https://github.com/fmeringdal/rust-rrule) - the inverse direction (parsing/expanding RRULEs)
+- [recurrent](https://github.com/kvh/recurrent) - Python version used as inspiration
+- [rrule.js](https://github.com/jkbrzt/rrule) — JavaScript version used as inspiration
