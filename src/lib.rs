@@ -1,3 +1,4 @@
+mod emit;
 mod en;
 mod eo;
 pub mod error;
@@ -38,10 +39,9 @@ pub fn text2rrule_with_locale(
     let (pattern, modifiers) = pattern::patternize(tokens)?;
     debug!("Pattern: {:?}", pattern);
     debug!("Modifiers: {:?}", modifiers);
-    // let rrule = emit::rrule(&pattern)?;
-    // debug!("RRULE: {:?}", rrule);
-    // rrule
-    todo!()
+    let rrule = emit::rrule(&pattern, Some(&modifiers))?;
+    debug!("RRULE: {:?}", rrule);
+    Ok(rrule)
 }
 
 #[cfg(test)]
