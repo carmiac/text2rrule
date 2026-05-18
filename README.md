@@ -1,5 +1,7 @@
 # text2rrule
 
+[![CI](https://github.com/carmiac/text2rrule/actions/workflows/ci.yml/badge.svg)](https://github.com/carmiac/text2rrule/actions/workflows/ci.yml)
+
 A Rust crate that converts plain-language descriptions of recurring events into [RFC 5545](https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.10) RRULE strings.
 
 ```text
@@ -12,9 +14,14 @@ Still a pre-1.0 work in progress, though the API is unlikely to change much.
 
 ## Install
 
-```toml
-[dependencies]
-text2rrule = { git = "https://github.com/carmiac/text2rrule" }
+```bash
+cargo add text2rrule
+```
+
+or for the example CLI tool:
+
+```bash
+cargo install --example text2rrule
 ```
 
 ## Usage
@@ -33,7 +40,7 @@ use text2rrule::text2rrule_with_locale;
 
 let rrule = text2rrule_with_locale(
     "every two weeks on friday",
-    ["en".to_string()].into_iter(),
+    ["en".to_string()],
 )?;
 ```
 
@@ -72,9 +79,13 @@ With no input argument, it reads one line from stdin.
 
 ## Internationalization
 
-This crate is designed to support multiple languages. However, I am only fluent enough in English and Esperanto to implement them. If you would like to help by adding a new language, see [##Contributing].
+This crate is designed to support multiple languages. However, I am only fluent enough in English and Esperanto to implement them. If you would like to help by adding a new language, see [Contributing](#contributing).
 
-## Architecture
+## Contributing
+
+Example phrases and PRs welcome! In particular, I'd love to get more languages/locales supported.
+
+### Architecture
 
 The pipeline has four stages:
 
@@ -118,22 +129,21 @@ Any `UntilDate`, `Count`, or `TimeOfDay` tokens are pulled into a separate `Modi
 
 4. Emit - Turn a `(RecurrencePattern, Modifiers)` pair into an RRULE string.
 
-## Contributing
-
-Example phrases and PRs welcome! In particular, I'd love to get more languages/locales supported.
-
 ### Adding a Locale
 
-1. Create `src/<code>.rs` exposing `pub fn normalize(&str) -> String` and `pub fn tokenize(&str) -> Result<Vec<Token>, ParseError>`. Use `src/en.rs` as the reference.
-2. In `src/lib.rs`, add `mod <code>;`.
-3. In `src/parser.rs`, add a variant to the `Parser` enum and add it into `Parser::get_parser`, `Parser::normalize`, and `Parser::tokenize`.
-4. Add tests for representative phrases. See `tests/en_e2e.rs` for end-to-end coverage.
+1. Create `src/locales/<code>.rs` exposing `pub fn normalize(&str) -> String` and `pub fn tokenize(&str) -> Result<Vec<Token>, ParseError>`. Use `src/locales/en.rs` as the reference.
+2. In `src/parser.rs`, add a variant to the `Parser` enum and add it into `Parser::get_parser`, `Parser::normalize`, and `Parser::tokenize`.
+3. Add tests for representative phrases. See `tests/en_e2e.rs` for end-to-end coverage.
 
 The patternize and emit stages are locale-agnostic, a new locale only needs to produce the same `Vec<Token>` that the English tokenizer does.
 
-## References
+## References and Inspiration
 
-- RFC 5545 § 3.3.10 — RRULE grammar
+- RFC 5545 § 3.3.10 - RRULE grammar
 - [rust-rrule](https://github.com/fmeringdal/rust-rrule) - the inverse direction (parsing/expanding RRULEs)
-- [recurrent](https://github.com/kvh/recurrent) - Python version used as inspiration
-- [rrule.js](https://github.com/jkbrzt/rrule) — JavaScript version used as inspiration
+- [recurrent](https://github.com/kvh/recurrent) - Python library used as inspiration
+- [rrule.js](https://github.com/jkbrzt/rrule) - JavaScript library used as inspiration
+
+## License
+
+[MPL 2.0](https://www.mozilla.org/en-US/MPL/2.0/)

@@ -2,6 +2,15 @@
 name = "text2rrule"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+authors = ["Adam Milner <carmiac@gmail.com>"]
+description = "Convert plain-language descriptions of recurring events into RFC 5545 RRULE strings."
+license = "MPL-2.0"
+repository = "https://github.com/carmiac/text2rrule"
+readme = "README.md"
+keywords = ["rrule", "rfc5545", "recurrence", "calendar", "icalendar"]
+categories = ["date-and-time", "parser-implementations", "internationalization"]
+exclude = [".github/"]
 
 [dependencies]
 chrono = "0.4.44"
