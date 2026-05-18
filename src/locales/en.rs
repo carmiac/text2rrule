@@ -125,9 +125,11 @@ fn strip_ordinal_suffix(w: &str) -> &str {
     let suffixes = ["st", "nd", "rd", "th"];
     for suffix in &suffixes {
         if let Some(stem) = w.strip_suffix(suffix)
-            && !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit()) {
-                return stem;
-            }
+            && !stem.is_empty()
+            && stem.chars().all(|c| c.is_ascii_digit())
+        {
+            return stem;
+        }
     }
     w
 }
@@ -296,25 +298,25 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
 
             // "the N <weekday>": MonthDay followed by Weekday means it was actually OrdinalPosition
             if let Weekday(_) = &token
-                && let Some(MonthDay(n)) = tokens.last().copied() {
-                    *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
-                }
+                && let Some(MonthDay(n)) = tokens.last().copied()
+            {
+                *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
+            }
 
             // "N of the month" / "N <weekday> of the month": retroactively fix preceding Interval
-            if of_context
-                && let Frequency(_) = &token {
-                    let len = tokens.len();
-                    if len >= 2 {
-                        // "N <weekday> of the month" → OrdinalPosition(N)
-                        if let (Interval(n), Weekday(_)) = (tokens[len - 2], tokens[len - 1]) {
-                            tokens[len - 2] = OrdinalPosition(n as i32);
-                        }
-                    } else if let Some(Interval(n)) = tokens.last().copied() {
-                        // "N of the month" → MonthDay(N)
-                        *tokens.last_mut().unwrap() = MonthDay(n as u8);
+            if of_context && let Frequency(_) = &token {
+                let len = tokens.len();
+                if len >= 2 {
+                    // "N <weekday> of the month" → OrdinalPosition(N)
+                    if let (Interval(n), Weekday(_)) = (tokens[len - 2], tokens[len - 1]) {
+                        tokens[len - 2] = OrdinalPosition(n as i32);
                     }
-                    of_context = false;
+                } else if let Some(Interval(n)) = tokens.last().copied() {
+                    // "N of the month" → MonthDay(N)
+                    *tokens.last_mut().unwrap() = MonthDay(n as u8);
                 }
+                of_context = false;
+            }
 
             if matches!(token, Month(_)) {
                 month_context = true;

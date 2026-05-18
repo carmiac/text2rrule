@@ -60,8 +60,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input = args
         .input
         .unwrap_or_else(|| io::stdin().lock().lines().next().unwrap().unwrap());
-    let output = if args.locale.is_some() {
-        text2rrule_with_locale(&input, [args.locale.unwrap()].into_iter())?
+    let output = if let Some(locale) = args.locale {
+        text2rrule_with_locale(&input, [locale])?
     } else {
         text2rrule(&input)?
     };

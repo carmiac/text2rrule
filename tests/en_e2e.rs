@@ -5,7 +5,7 @@
 use text2rrule::{ParseError, text2rrule_with_locale};
 
 fn en(input: &str) -> Result<String, ParseError> {
-    text2rrule_with_locale(input, ["en".to_string()].into_iter())
+    text2rrule_with_locale(input, ["en".to_string()])
 }
 
 #[test]
