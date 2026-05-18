@@ -43,7 +43,6 @@ pub fn normalize(input: &str) -> String {
             "fortnight" => "every 2 weeks",
             "quarterly" => "every 3 months",
             "semiannually" => "every 6 months",
-            "semi annually" => "every 6 months",
             "biweekly" => "every 2 weeks",
             "bimonthly" => "every 2 months",
             "biannually" => "every 2 years",
@@ -119,7 +118,6 @@ pub fn normalize(input: &str) -> String {
         }
     }
 
-    println!("result: {:?}", result);
     result.join(" ")
 }
 
@@ -151,10 +149,11 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
 
     let mut twice = false;
     let mut the_context = false; // causes next number to be a MonthDay
+    let mut month_context = false; // causes next number after a Month to be a MonthDay
     let mut of_context = false; // causes next Frequency to retroactively convert last Interval -> MonthDay
     let mut until = false;
     let mut until_month: Option<u32> = None;
-    let mut until_day: Option<i32> = None;
+    let mut until_day: Option<u32> = None;
 
     for word in input.split_whitespace() {
         let token: Option<Token> = match word {
@@ -202,15 +201,18 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                 continue;
             }
 
-            // plain numbers: negative -> OrdinalPosition, after "the" -> MonthDay, else -> Interval
+            // plain numbers: negative -> OrdinalPosition, after "the" or a Month -> MonthDay, else -> Interval
             s if let Ok(n) = s.parse::<i32>() => {
                 if n < 0 {
                     Some(OrdinalPosition(n))
                 } else if the_context {
                     the_context = false;
                     Some(MonthDay(n as u8))
+                } else if month_context && !until {
+                    month_context = false;
+                    Some(MonthDay(n as u8))
                 } else {
-                    Some(Interval(n))
+                    Some(Interval(n as u32))
                 }
             }
 
@@ -271,12 +273,12 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                         continue;
                     }
                     Interval(n) if until_month.is_some() && until_day.is_none() => {
-                        until_day = Some(*n);
+                        until_day = Some(*n as u32);
                         continue;
                     }
                     Interval(n) if until_month.is_some() && until_day.is_some() => {
                         let date = NaiveDate::from_ymd_opt(
-                            *n,
+                            *n as i32,
                             until_month.unwrap(),
                             until_day.unwrap() as u32,
                         )
@@ -307,7 +309,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                     if len >= 2 {
                         // "N <weekday> of the month" → OrdinalPosition(N)
                         if let (Interval(n), Weekday(_)) = (tokens[len - 2], tokens[len - 1]) {
-                            tokens[len - 2] = OrdinalPosition(n);
+                            tokens[len - 2] = OrdinalPosition(n as i32);
                         }
                     } else if let Some(Interval(n)) = tokens.last().copied() {
                         // "N of the month" → MonthDay(N)
@@ -317,6 +319,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                 }
             }
 
+            if matches!(token, Month(_)) {
+                month_context = true;
+            }
             tokens.push(token);
         }
     }
@@ -641,6 +646,18 @@ mod tests {
         assert_eq!(tokenize(&normalize("oct")), Ok(vec![Month(October)]));
         assert_eq!(tokenize(&normalize("nov")), Ok(vec![Month(November)]));
         assert_eq!(tokenize(&normalize("dec")), Ok(vec![Month(December)]));
+    }
+
+    #[test]
+    fn token_month_followed_by_day() {
+        assert_eq!(
+            tokenize(&normalize("june 1")),
+            Ok(vec![Month(June), MonthDay(1)])
+        );
+        assert_eq!(
+            tokenize(&normalize("every year on june 1st")),
+            Ok(vec![Frequency(Yearly), Month(June), MonthDay(1)])
+        );
     }
 
     #[test]

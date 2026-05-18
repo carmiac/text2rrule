@@ -2,6 +2,7 @@ mod en;
 mod eo;
 pub mod error;
 mod parser;
+mod pattern;
 mod token;
 use crate::parser::Parser;
 pub use error::ParseError;
@@ -34,8 +35,9 @@ pub fn text2rrule_with_locale(
     debug!("Normalized: {:?}", normalized);
     let tokens = parser.tokenize(&normalized)?;
     debug!("Tokens: {:?}", tokens);
-    // let pattern = pattern::patternize(&tokens)?;
-    // debug!("Pattern: {:?}", pattern);
+    let (pattern, modifiers) = pattern::patternize(tokens)?;
+    debug!("Pattern: {:?}", pattern);
+    debug!("Modifiers: {:?}", modifiers);
     // let rrule = emit::rrule(&pattern)?;
     // debug!("RRULE: {:?}", rrule);
     // rrule
