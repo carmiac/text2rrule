@@ -144,11 +144,10 @@ pub fn normalize(input: &str) -> String {
 }
 
 fn strip_ordinal_a(w: &str) -> &str {
-    if let Some(stem) = w.strip_suffix('a') {
-        if !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit()) {
+    if let Some(stem) = w.strip_suffix('a')
+        && !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit()) {
             return stem;
         }
-    }
     w
 }
 
@@ -313,15 +312,14 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             }
 
             // "la N <weekday>": MonthDay followed by Weekday means it was OrdinalPosition.
-            if let Weekday(_) = &token {
-                if let Some(MonthDay(n)) = tokens.last().copied() {
+            if let Weekday(_) = &token
+                && let Some(MonthDay(n)) = tokens.last().copied() {
                     *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
                 }
-            }
 
             // "N de la monato" / "N <weekday> de la monato": fix preceding Interval.
-            if of_context {
-                if let Frequency(_) = &token {
+            if of_context
+                && let Frequency(_) = &token {
                     let len = tokens.len();
                     if len >= 2 {
                         if let (Interval(n), Weekday(_)) = (tokens[len - 2], tokens[len - 1]) {
@@ -332,7 +330,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                     }
                     of_context = false;
                 }
-            }
 
             if matches!(token, Month(_)) {
                 month_context = true;

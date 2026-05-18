@@ -21,7 +21,7 @@ pub fn normalize(input: &str) -> String {
     let mut result: Vec<String> = Vec::new();
     for word in s.split_whitespace() {
         // strip ordinal suffixes from numbers (1st -> 1, 2nd -> 2, etc.)
-        let word = strip_ordinal_suffix(&word);
+        let word = strip_ordinal_suffix(word);
         // Taskwarrior shorthands
         // 123ABC -> 123 ABC
         // but not 12:34 -> 12 :34.
@@ -124,11 +124,10 @@ pub fn normalize(input: &str) -> String {
 fn strip_ordinal_suffix(w: &str) -> &str {
     let suffixes = ["st", "nd", "rd", "th"];
     for suffix in &suffixes {
-        if let Some(stem) = w.strip_suffix(suffix) {
-            if !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit()) {
+        if let Some(stem) = w.strip_suffix(suffix)
+            && !stem.is_empty() && stem.chars().all(|c| c.is_ascii_digit()) {
                 return stem;
             }
-        }
     }
     w
 }
@@ -224,7 +223,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             // "3 times" -> Count(3): convert the last Interval that was already pushed
             "times" => {
                 if let Some(Interval(n)) = tokens.last().copied() {
-                    *tokens.last_mut().unwrap() = Count(n as u32);
+                    *tokens.last_mut().unwrap() = Count(n);
                 }
                 continue;
             }
@@ -273,14 +272,14 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                         continue;
                     }
                     Interval(n) if until_month.is_some() && until_day.is_none() => {
-                        until_day = Some(*n as u32);
+                        until_day = Some(*n);
                         continue;
                     }
                     Interval(n) if until_month.is_some() && until_day.is_some() => {
                         let date = NaiveDate::from_ymd_opt(
                             *n as i32,
                             until_month.unwrap(),
-                            until_day.unwrap() as u32,
+                            until_day.unwrap(),
                         )
                         .ok_or_else(|| {
                             ParseError::UnrecognizedInput("invalid until date".into())
@@ -296,15 +295,14 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             }
 
             // "the N <weekday>": MonthDay followed by Weekday means it was actually OrdinalPosition
-            if let Weekday(_) = &token {
-                if let Some(MonthDay(n)) = tokens.last().copied() {
+            if let Weekday(_) = &token
+                && let Some(MonthDay(n)) = tokens.last().copied() {
                     *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
                 }
-            }
 
             // "N of the month" / "N <weekday> of the month": retroactively fix preceding Interval
-            if of_context {
-                if let Frequency(_) = &token {
+            if of_context
+                && let Frequency(_) = &token {
                     let len = tokens.len();
                     if len >= 2 {
                         // "N <weekday> of the month" → OrdinalPosition(N)
@@ -317,7 +315,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                     }
                     of_context = false;
                 }
-            }
 
             if matches!(token, Month(_)) {
                 month_context = true;
