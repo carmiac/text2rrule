@@ -1,3 +1,17 @@
+//! Convert plain-language descriptions of recurring events into RFC 5545 RRULE strings.
+//!
+//! ```
+//! use text2rrule::text2rrule_with_locale;
+//!
+//! let rrule = text2rrule_with_locale(
+//!     "every two weeks on friday",
+//!     ["en".to_string()],
+//! ).unwrap();
+//! assert_eq!(rrule, "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR");
+//! ```
+
+#![forbid(unsafe_code)]
+
 mod emit;
 pub mod error;
 mod locales;
