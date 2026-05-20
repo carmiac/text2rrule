@@ -237,7 +237,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             }
 
             // Numbers.
-            s if let Ok(n) = s.parse::<i32>() => {
+            s if s.parse::<i32>().is_ok() => {
+                let n = s.parse::<i32>().unwrap();
                 if n < 0 {
                     Some(OrdinalPosition(n))
                 } else if the_context {
