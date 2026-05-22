@@ -76,6 +76,22 @@ fn monthly_by_day() {
 }
 
 #[test]
+fn monthly_by_day_multi_of() {
+    assert_eq!(
+        eo("la 1a kaj 15a de ĉiu monato").unwrap(),
+        "FREQ=MONTHLY;BYMONTHDAY=1,15"
+    );
+}
+
+#[test]
+fn monthly_by_day_multi_on_the() {
+    assert_eq!(
+        eo("ĉiumonate je la 1a, 10a kaj 15a").unwrap(),
+        "FREQ=MONTHLY;BYMONTHDAY=1,10,15"
+    );
+}
+
+#[test]
 fn monthly_by_position_third_friday() {
     assert_eq!(
         eo("ĉiumonate je la tria vendredo").unwrap(),

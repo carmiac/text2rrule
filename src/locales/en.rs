@@ -150,8 +150,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
 
     let mut twice = false;
     let mut the_context = false; // causes next number to be a MonthDay
+    let mut monthday_streak = false; // sticky after "the N": subsequent bare numbers stay MonthDay
     let mut month_context = false; // causes next number after a Month to be a MonthDay
     let mut of_context = false; // causes next Frequency to retroactively convert last Interval -> MonthDay
+    let mut of_pos: Option<usize> = None; // tokens.len() at the moment "of" was seen
     let mut until = false;
     let mut until_month: Option<u32> = None;
     let mut until_day: Option<u32> = None;
@@ -199,6 +201,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
 
             "of" => {
                 of_context = true;
+                of_pos = Some(tokens.len());
                 continue;
             }
 
@@ -207,8 +210,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                 let n = s.parse::<i32>().unwrap();
                 if n < 0 {
                     Some(OrdinalPosition(n))
-                } else if the_context {
+                } else if the_context || monthday_streak {
                     the_context = false;
+                    monthday_streak = true;
                     Some(MonthDay(n as u8))
                 } else if month_context && !until {
                     month_context = false;
@@ -306,21 +310,33 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
 
             // "N of the month" / "N <weekday> of the month": retroactively fix preceding Interval
             if of_context && let Frequency(_) = &token {
-                let len = tokens.len();
-                if len >= 2 {
-                    // "N <weekday> of the month" → OrdinalPosition(N)
-                    if let (Interval(n), Weekday(_)) = (tokens[len - 2], tokens[len - 1]) {
-                        tokens[len - 2] = OrdinalPosition(n as i32);
+                let anchor = of_pos.unwrap_or(tokens.len());
+                if anchor >= 2 {
+                    // "N <weekday> of the month" -> OrdinalPosition(N)
+                    if let (Interval(n), Weekday(_)) = (tokens[anchor - 2], tokens[anchor - 1]) {
+                        tokens[anchor - 2] = OrdinalPosition(n as i32);
                     }
-                } else if let Some(Interval(n)) = tokens.last().copied() {
-                    // "N of the month" → MonthDay(N)
-                    *tokens.last_mut().unwrap() = MonthDay(n as u8);
+                }
+                // Walk back through any trailing Intervals before `of` and rewrite as MonthDays.
+                // Handles "1 and 15 of every month" -> MonthDay(1), MonthDay(15).
+                let mut i = anchor;
+                while i > 0 {
+                    if let Interval(n) = tokens[i - 1] {
+                        tokens[i - 1] = MonthDay(n as u8);
+                        i -= 1;
+                    } else {
+                        break;
+                    }
                 }
                 of_context = false;
+                of_pos = None;
             }
 
             if matches!(token, Month(_)) {
                 month_context = true;
+            }
+            if !matches!(token, MonthDay(_)) {
+                monthday_streak = false;
             }
             tokens.push(token);
         }
