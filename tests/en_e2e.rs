@@ -79,6 +79,22 @@ fn monthly_by_day() {
 }
 
 #[test]
+fn monthly_by_day_multi_of() {
+    assert_eq!(
+        en("1st and 15th of every month").unwrap(),
+        "FREQ=MONTHLY;BYMONTHDAY=1,15"
+    );
+}
+
+#[test]
+fn monthly_by_day_multi_on_the() {
+    assert_eq!(
+        en("every month on the 1st, 10th and 15th").unwrap(),
+        "FREQ=MONTHLY;BYMONTHDAY=1,10,15"
+    );
+}
+
+#[test]
 fn monthly_by_position_third_friday() {
     assert_eq!(
         en("monthly on the third friday").unwrap(),
