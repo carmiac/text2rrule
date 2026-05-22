@@ -8,6 +8,7 @@ A Rust crate that converts plain-language descriptions of recurring events into 
 "every two weeks on friday"      ->  FREQ=WEEKLY;INTERVAL=2;BYDAY=FR
 "monthly on the third friday"    ->  FREQ=MONTHLY;BYDAY=3FR
 "every weekday at 9:30am"        ->  FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=30
+"the 1st and 15th of every month" -> FREQ=MONTHLY;BYMONTHDAY=1,15
 ```
 
 Still a pre-1.0 work in progress, though the API is unlikely to change much.
