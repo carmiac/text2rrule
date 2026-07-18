@@ -13,7 +13,7 @@ categories = ["date-and-time", "parser-implementations", "internationalization"]
 exclude = [".github/"]
 
 [dependencies]
-chrono = "0.4.44"
+chrono = "0.4.45"
 sys-locale = "0.3.2"
 tracing = "0.1.44"
 
