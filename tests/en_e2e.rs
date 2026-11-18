@@ -157,3 +157,103 @@ fn unsupported_twice_a_week() {
         Err(ParseError::UnsupportedPattern(_))
     ));
 }
+
+#[test]
+fn monthly_by_position_multi() {
+    for input in [
+        "monthly on the first and third monday",
+        "monthly on the 1st and 3rd monday",
+        "the first and third monday of every month",
+        "every month on the first and third monday",
+        "every first and third monday of the month",
+        "first and third monday",
+        "monthly on the first monday and third monday",
+    ] {
+        assert_eq!(en(input).unwrap(), "FREQ=MONTHLY;BYDAY=1MO,3MO", "{input}");
+    }
+}
+
+#[test]
+fn monthly_by_position_mixed_weekdays() {
+    assert_eq!(
+        en("first monday and third wednesday").unwrap(),
+        "FREQ=MONTHLY;BYDAY=1MO,3WE"
+    );
+}
+
+#[test]
+fn monthly_by_position_no_frequency() {
+    assert_eq!(en("first monday").unwrap(), "FREQ=MONTHLY;BYDAY=1MO");
+    assert_eq!(en("every first monday").unwrap(), "FREQ=MONTHLY;BYDAY=1MO");
+}
+
+#[test]
+fn monthly_by_position_every_second_of_the_month() {
+    assert_eq!(
+        en("every second monday of the month").unwrap(),
+        "FREQ=MONTHLY;BYDAY=2MO"
+    );
+}
+
+#[test]
+fn monthly_by_position_with_interval() {
+    assert_eq!(
+        en("every 2 months on the last friday").unwrap(),
+        "FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR"
+    );
+}
+
+#[test]
+fn yearly_by_position_no_frequency() {
+    assert_eq!(
+        en("the first monday of may").unwrap(),
+        "FREQ=YEARLY;BYMONTH=5;BYDAY=1MO"
+    );
+    assert_eq!(
+        en("every second monday of may").unwrap(),
+        "FREQ=YEARLY;BYMONTH=5;BYDAY=2MO"
+    );
+}
+
+#[test]
+fn yearly_by_position_multi() {
+    assert_eq!(
+        en("the first and third monday of may").unwrap(),
+        "FREQ=YEARLY;BYMONTH=5;BYDAY=1MO,3MO"
+    );
+}
+
+#[test]
+fn every_second_weekday_is_alternate() {
+    for input in [
+        "every second monday",
+        "every 2nd monday",
+        "every other monday",
+        "every 2 weeks on monday",
+    ] {
+        assert_eq!(
+            en(input).unwrap(),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+            "{input}"
+        );
+    }
+}
+
+#[test]
+fn simple_twice_a_year() {
+    assert_eq!(en("twice a year").unwrap(), "FREQ=MONTHLY;INTERVAL=6");
+}
+
+#[test]
+fn unsupported_position_errors() {
+    for input in [
+        "every 2 weeks on the third friday",
+        "first monday and wednesday",
+        "first monday and last",
+    ] {
+        assert!(
+            matches!(en(input), Err(ParseError::UnsupportedPattern(_))),
+            "{input}"
+        );
+    }
+}

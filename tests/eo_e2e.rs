@@ -170,3 +170,66 @@ fn bare_ascii_input() {
         "FREQ=WEEKLY;INTERVAL=2;BYDAY=TH"
     );
 }
+
+#[test]
+fn monthly_by_position_multi() {
+    for input in [
+        "ĉiumonate je la unua kaj tria lundo",
+        "ĉiumonate je la 1-a kaj 3-a lundo",
+        "la unua kaj tria lundo de ĉiu monato",
+        "ĉiun unuan kaj trian lundon de la monato",
+        "unua kaj tria lundo",
+        "ĉiumonate je la unua lundo kaj tria lundo",
+    ] {
+        assert_eq!(eo(input).unwrap(), "FREQ=MONTHLY;BYDAY=1MO,3MO", "{input}");
+    }
+}
+
+#[test]
+fn monthly_by_position_mixed_weekdays() {
+    assert_eq!(
+        eo("unua lundo kaj tria merkredo").unwrap(),
+        "FREQ=MONTHLY;BYDAY=1MO,3WE"
+    );
+}
+
+#[test]
+fn monthly_by_position_no_frequency() {
+    assert_eq!(eo("unua lundo").unwrap(), "FREQ=MONTHLY;BYDAY=1MO");
+    assert_eq!(eo("ĉiun unuan lundon").unwrap(), "FREQ=MONTHLY;BYDAY=1MO");
+}
+
+#[test]
+fn monthly_by_position_every_second_of_the_month() {
+    assert_eq!(
+        eo("ĉiun duan lundon de la monato").unwrap(),
+        "FREQ=MONTHLY;BYDAY=2MO"
+    );
+}
+
+#[test]
+fn yearly_by_position_no_frequency() {
+    assert_eq!(
+        eo("la unua lundo de majo").unwrap(),
+        "FREQ=YEARLY;BYMONTH=5;BYDAY=1MO"
+    );
+}
+
+#[test]
+fn yearly_by_position_multi() {
+    assert_eq!(
+        eo("la unua kaj tria lundo de majo").unwrap(),
+        "FREQ=YEARLY;BYMONTH=5;BYDAY=1MO,3MO"
+    );
+}
+
+#[test]
+fn every_second_weekday_is_alternate() {
+    for input in ["ĉiun duan lundon", "ĉiun alian lundon"] {
+        assert_eq!(
+            eo(input).unwrap(),
+            "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+            "{input}"
+        );
+    }
+}

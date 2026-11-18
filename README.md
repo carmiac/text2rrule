@@ -9,6 +9,7 @@ A Rust crate that converts plain-language descriptions of recurring events into 
 "monthly on the third friday"    ->  FREQ=MONTHLY;BYDAY=3FR
 "every weekday at 9:30am"        ->  FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=30
 "the 1st and 15th of every month" -> FREQ=MONTHLY;BYMONTHDAY=1,15
+"first and third monday"         ->  FREQ=MONTHLY;BYDAY=1MO,3MO
 ```
 
 Still a pre-1.0 work in progress, though the API is unlikely to change much.
@@ -58,8 +59,13 @@ let rrule = text2rrule_with_locale(
 | `every weekday`, `weekends` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR` , etc... |
 | `monthly on the 15th`, `the 1st and 15th of every month` | `FREQ=MONTHLY;BYMONTHDAY=15`, `BYMONTHDAY=1,15` |
 | `monthly on the third friday`, `every last friday of the month` | `FREQ=MONTHLY;BYDAY=3FR`, `BYDAY=-1FR` |
+| `the first and third monday of every month`, `first and third monday` | `FREQ=MONTHLY;BYDAY=1MO,3MO` |
+| `first monday and third wednesday` | `FREQ=MONTHLY;BYDAY=1MO,3WE` |
+| `every second monday` | `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO` |
+| `every second monday of the month` | `FREQ=MONTHLY;BYDAY=2MO` |
 | `every year on the 1st of june` | `FREQ=YEARLY;BYMONTH=6;BYMONTHDAY=1` |
 | `every year on the last monday of may` | `FREQ=YEARLY;BYMONTH=5;BYDAY=-1MO` |
+| `the first and third monday of may` | `FREQ=YEARLY;BYMONTH=5;BYDAY=1MO,3MO` |
 | `weekly on thursday three times` | `FREQ=WEEKLY;BYDAY=TH;COUNT=3` |
 | `every day until March 6th, 2027` | `FREQ=DAILY;UNTIL=20270306` |
 | `daily at 9:30am` | `FREQ=DAILY;BYHOUR=9;BYMINUTE=30` |

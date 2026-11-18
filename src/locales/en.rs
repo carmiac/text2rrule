@@ -20,8 +20,12 @@ pub fn normalize(input: &str) -> String {
     // Now all of the single word replacements.
     let mut result: Vec<String> = Vec::new();
     for word in s.split_whitespace() {
-        // strip ordinal suffixes from numbers (1st -> 1, 2nd -> 2, etc.)
-        let word = strip_ordinal_suffix(word);
+        // Ordinal numbers (1st, 2nd, ...) are kept as is so the tokenizer can tell them from
+        // cardinals.
+        if strip_ordinal_suffix(word) != word {
+            result.push(word.into());
+            continue;
+        }
         // Taskwarrior shorthands
         // 123ABC -> 123 ABC
         // but not 12:34 -> 12 :34.
@@ -85,17 +89,17 @@ pub fn normalize(input: &str) -> String {
             "nov" => "november",
             "dec" => "december",
 
-            // ordinal words -> digits
-            "first" => "1",
-            "second" => "2",
-            "third" => "3",
-            "fourth" => "4",
-            "fifth" => "5",
-            "sixth" => "6",
-            "seventh" => "7",
-            "eighth" => "8",
-            "ninth" => "9",
-            "tenth" => "10",
+            // ordinal words -> ordinal numbers
+            "first" => "1st",
+            "second" => "2nd",
+            "third" => "3rd",
+            "fourth" => "4th",
+            "fifth" => "5th",
+            "sixth" => "6th",
+            "seventh" => "7th",
+            "eighth" => "8th",
+            "ninth" => "9th",
+            "tenth" => "10th",
             "last" => "-1",
 
             // cardinal number words -> digits
@@ -121,6 +125,11 @@ pub fn normalize(input: &str) -> String {
     result.join(" ")
 }
 
+/// Parse a cardinal (2, -1) or ordinal (2nd) number.
+fn parse_number(s: &str) -> Option<i32> {
+    strip_ordinal_suffix(s).parse().ok()
+}
+
 fn strip_ordinal_suffix(w: &str) -> &str {
     let suffixes = ["st", "nd", "rd", "th"];
     for suffix in &suffixes {
@@ -134,8 +143,10 @@ fn strip_ordinal_suffix(w: &str) -> &str {
     w
 }
 
+use crate::locales::mark_positions;
 use crate::{error::ParseError, token::Token};
 use chrono::{NaiveDate, NaiveTime};
+use std::collections::HashSet;
 /// Turn an input str into a vector of tokens.
 ///
 /// input should be normalized
@@ -157,8 +168,15 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
     let mut until = false;
     let mut until_month: Option<u32> = None;
     let mut until_day: Option<u32> = None;
+    let mut ordinals: HashSet<usize> = HashSet::new(); // indices of tokens written as ordinals
+    let mut after_every: Option<usize> = None; // index of an Interval right after "every"
+    let mut prev_word: Option<&str> = None;
 
     for word in input.split_whitespace() {
+        let follows_every = prev_word.is_some_and(|w| w == "every");
+        prev_word = Some(word);
+        let mut is_ordinal = false;
+
         let token: Option<Token> = match word {
             // Simple frequencies.
             "daily" | "days" | "day" => Some(Frequency(Daily)),
@@ -206,8 +224,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             }
 
             // plain numbers: negative -> OrdinalPosition, after "the" or a Month -> MonthDay, else -> Interval
-            s if s.parse::<i32>().is_ok() => {
-                let n = s.parse::<i32>().unwrap();
+            s if parse_number(s).is_some() => {
+                let n = parse_number(s).unwrap();
+                is_ordinal = s.parse::<i32>().is_err();
                 if n < 0 {
                     Some(OrdinalPosition(n))
                 } else if the_context || monthday_streak {
@@ -301,22 +320,21 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                 }
             }
 
-            // "the N <weekday>": MonthDay followed by Weekday means it was actually OrdinalPosition
-            if let Weekday(_) = &token
-                && let Some(MonthDay(n)) = tokens.last().copied()
-            {
-                *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
+            if let Weekday(_) = &token {
+                mark_positions(&mut tokens, &ordinals, after_every);
             }
 
-            // "N of the month" / "N <weekday> of the month": retroactively fix preceding Interval
-            if of_context && let Frequency(_) = &token {
+            // "N <weekday> of the month" / "N <weekday> of may": the preceding Interval is a position
+            if of_context && matches!(token, Frequency(_) | Month(_)) {
                 let anchor = of_pos.unwrap_or(tokens.len());
                 if anchor >= 2 {
-                    // "N <weekday> of the month" -> OrdinalPosition(N)
                     if let (Interval(n), Weekday(_)) = (tokens[anchor - 2], tokens[anchor - 1]) {
                         tokens[anchor - 2] = OrdinalPosition(n as i32);
                     }
                 }
+            }
+            if of_context && let Frequency(_) = &token {
+                let anchor = of_pos.unwrap_or(tokens.len());
                 // Walk back through any trailing Intervals before `of` and rewrite as MonthDays.
                 // Handles "1 and 15 of every month" -> MonthDay(1), MonthDay(15).
                 let mut i = anchor;
@@ -337,6 +355,12 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             }
             if !matches!(token, MonthDay(_)) {
                 monthday_streak = false;
+            }
+            if is_ordinal {
+                ordinals.insert(tokens.len());
+            }
+            if follows_every && matches!(token, Interval(_)) {
+                after_every = Some(tokens.len());
             }
             tokens.push(token);
         }
@@ -484,23 +508,23 @@ mod tests {
 
     #[test]
     fn expand_ordinal_words() {
-        assert_eq!(normalize("first"), "1");
-        assert_eq!(normalize("second"), "2");
-        assert_eq!(normalize("third"), "3");
-        assert_eq!(normalize("fourth"), "4");
-        assert_eq!(normalize("fifth"), "5");
-        assert_eq!(normalize("sixth"), "6");
+        assert_eq!(normalize("first"), "1st");
+        assert_eq!(normalize("second"), "2nd");
+        assert_eq!(normalize("third"), "3rd");
+        assert_eq!(normalize("fourth"), "4th");
+        assert_eq!(normalize("fifth"), "5th");
+        assert_eq!(normalize("sixth"), "6th");
         assert_eq!(normalize("last"), "-1");
     }
 
     #[test]
-    fn strip_ordinal_suffixes() {
-        assert_eq!(normalize("1st"), "1");
-        assert_eq!(normalize("2nd"), "2");
-        assert_eq!(normalize("3rd"), "3");
-        assert_eq!(normalize("4th"), "4");
-        assert_eq!(normalize("15th"), "15");
-        assert_eq!(normalize("21st"), "21");
+    fn keep_ordinal_suffixes() {
+        assert_eq!(normalize("1st"), "1st");
+        assert_eq!(normalize("2nd"), "2nd");
+        assert_eq!(normalize("3rd"), "3rd");
+        assert_eq!(normalize("4th"), "4th");
+        assert_eq!(normalize("15th"), "15th");
+        assert_eq!(normalize("21st"), "21st");
     }
 
     #[test]
@@ -536,13 +560,16 @@ mod tests {
         );
         assert_eq!(
             normalize("every 3rd month on the 4th"),
-            "every 3 month on the 4"
+            "every 3rd month on the 4th"
         );
         assert_eq!(
             normalize("every last fri of the month"),
             "every -1 friday of the month"
         );
-        assert_eq!(normalize("every 2nd of the month"), "every 2 of the month");
+        assert_eq!(
+            normalize("every 2nd of the month"),
+            "every 2nd of the month"
+        );
         assert_eq!(normalize("Fortnightly on Tues"), "every 2 weeks on tuesday");
         assert_eq!(normalize("Quarterly"), "every 3 months");
     }

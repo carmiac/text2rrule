@@ -40,11 +40,10 @@ pub enum RecurrencePattern {
         days: Vec<u8>,
     },
 
-    // "monthly on the third tuesday"
+    // "monthly on the third tuesday", "the first and third monday"
     MonthlyByPosition {
         interval: u32,
-        pos: i8,
-        weekday: Weekday,
+        days: Vec<(i8, Weekday)>,
     },
 
     // "every year on june 1st", "every year on jan 1 and july 1"
@@ -53,11 +52,10 @@ pub enum RecurrencePattern {
         days: Vec<u8>,
     },
 
-    // "the last monday of may", "the third thursday of november"
+    // "the last monday of may", "the first and third monday of may"
     YearlyByPosition {
         month: Month,
-        pos: i8,
-        weekday: Weekday,
+        days: Vec<(i8, Weekday)>,
     },
 }
 
@@ -81,16 +79,6 @@ fn first_month(tokens: &[Token]) -> Option<Month> {
     })
 }
 
-fn first_weekday(tokens: &[Token]) -> Option<Weekday> {
-    tokens.iter().find_map(|t| {
-        if let Token::Weekday(w) = t {
-            Some(*w)
-        } else {
-            None
-        }
-    })
-}
-
 fn first_weekday_set(tokens: &[Token]) -> Option<DaySet> {
     tokens.iter().find_map(|t| {
         if let Token::WeekdaySet(s) = t {
@@ -101,14 +89,31 @@ fn first_weekday_set(tokens: &[Token]) -> Option<DaySet> {
     })
 }
 
-fn first_position(tokens: &[Token]) -> Option<i8> {
-    tokens.iter().find_map(|t| {
-        if let Token::OrdinalPosition(p) = t {
-            Some(*p as i8)
-        } else {
-            None
+/// Pairs each weekday with the ordinal positions right before it.
+///
+/// "1 3 monday 2 friday" -> [(1, monday), (3, monday), (2, friday)]. A position without a
+/// following weekday, or a weekday without a position, is an error.
+fn position_pairs(tokens: &[Token]) -> Result<Vec<(i8, Weekday)>, ParseError> {
+    let unpaired =
+        || ParseError::UnsupportedPattern(format!("unpaired position or weekday: {:?}", tokens));
+    let mut pairs = Vec::new();
+    let mut pending: Vec<i8> = Vec::new();
+    for token in tokens {
+        match token {
+            Token::OrdinalPosition(p) => pending.push(*p as i8),
+            Token::Weekday(w) => {
+                if pending.is_empty() {
+                    return Err(unpaired());
+                }
+                pairs.extend(pending.drain(..).map(|p| (p, *w)));
+            }
+            _ => {}
         }
-    })
+    }
+    if !pending.is_empty() {
+        return Err(unpaired());
+    }
+    Ok(pairs)
 }
 
 fn interval_or_1(tokens: &[Token]) -> u32 {
@@ -263,43 +268,33 @@ pub fn patternize(tokens: Vec<Token>) -> Result<(RecurrencePattern, Modifiers), 
         return Ok((RecurrencePattern::YearlyByMonth { month, days }, modifiers));
     }
 
-    // YearlyByPosition -> "the last monday of may", "the third thursday of november"
+    // YearlyByPosition -> "the last monday of may", "the first and third monday of may"
+    // Frequency is optional, but must be yearly if given.
     if required(&[
         TokenTag::Month,
         TokenTag::OrdinalPosition,
         TokenTag::Weekday,
-        TokenTag::Frequency,
     ]) && excluded(&[TokenTag::WeekdaySet, TokenTag::MonthDay])
+        && matches!(first_freq(&tokens), None | Some(FreqWord::Yearly))
     {
         let month = first_month(&tokens).ok_or_else(|| missing("month"))?;
-        let pos = first_position(&tokens).ok_or_else(|| missing("ordinal position"))?;
-        let weekday = first_weekday(&tokens).ok_or_else(|| missing("weekday"))?;
+        let days = position_pairs(&tokens)?;
         return Ok((
-            RecurrencePattern::YearlyByPosition {
-                month,
-                pos,
-                weekday,
-            },
+            RecurrencePattern::YearlyByPosition { month, days },
             modifiers,
         ));
     }
 
-    // MonthlyByPosition -> "monthly on the third tuesday", "every last fri of the month"
-    if required(&[
-        TokenTag::OrdinalPosition,
-        TokenTag::Weekday,
-        TokenTag::Frequency,
-    ]) && excluded(&[TokenTag::WeekdaySet, TokenTag::MonthDay, TokenTag::Month])
+    // MonthlyByPosition -> "monthly on the third tuesday", "first and third monday"
+    // Frequency is optional, but must be monthly if given.
+    if required(&[TokenTag::OrdinalPosition, TokenTag::Weekday])
+        && excluded(&[TokenTag::WeekdaySet, TokenTag::MonthDay, TokenTag::Month])
+        && matches!(first_freq(&tokens), None | Some(FreqWord::Monthly))
     {
-        let pos = first_position(&tokens).ok_or_else(|| missing("ordinal position"))?;
-        let weekday = first_weekday(&tokens).ok_or_else(|| missing("weekday"))?;
+        let days = position_pairs(&tokens)?;
         let interval = interval_or_1(&tokens);
         return Ok((
-            RecurrencePattern::MonthlyByPosition {
-                interval,
-                pos,
-                weekday,
-            },
+            RecurrencePattern::MonthlyByPosition { interval, days },
             modifiers,
         ));
     }
@@ -480,8 +475,7 @@ mod tests {
             Ok((
                 YearlyByPosition {
                     month: May,
-                    pos: -1,
-                    weekday: Monday
+                    days: vec![(-1, Monday)]
                 },
                 Modifiers::default()
             ))
@@ -497,8 +491,7 @@ mod tests {
             Ok((
                 YearlyByPosition {
                     month: November,
-                    pos: 4,
-                    weekday: Thursday
+                    days: vec![(4, Thursday)]
                 },
                 Modifiers::default()
             ))
@@ -516,8 +509,7 @@ mod tests {
             Ok((
                 MonthlyByPosition {
                     interval: 1,
-                    pos: 3,
-                    weekday: Friday
+                    days: vec![(3, Friday)]
                 },
                 Modifiers::default()
             ))
@@ -531,8 +523,7 @@ mod tests {
             Ok((
                 MonthlyByPosition {
                     interval: 1,
-                    pos: -1,
-                    weekday: Friday
+                    days: vec![(-1, Friday)]
                 },
                 Modifiers::default()
             ))
@@ -546,11 +537,110 @@ mod tests {
             Ok((
                 MonthlyByPosition {
                     interval: 1,
-                    pos: 2,
-                    weekday: Wednesday
+                    days: vec![(2, Wednesday)]
                 },
                 Modifiers::default()
             ))
+        );
+    }
+
+    #[test]
+    fn multi_position() {
+        // "monthly on the first monday and third wednesday"
+        assert_eq!(
+            patternize(vec![
+                Frequency(Monthly),
+                OrdinalPosition(1),
+                Weekday(Monday),
+                OrdinalPosition(3),
+                Weekday(Wednesday)
+            ]),
+            Ok((
+                MonthlyByPosition {
+                    interval: 1,
+                    days: vec![(1, Monday), (3, Wednesday)]
+                },
+                Modifiers::default()
+            ))
+        );
+        // "the first and third monday of may"
+        assert_eq!(
+            patternize(vec![
+                OrdinalPosition(1),
+                OrdinalPosition(3),
+                Weekday(Monday),
+                Month(May)
+            ]),
+            Ok((
+                YearlyByPosition {
+                    month: May,
+                    days: vec![(1, Monday), (3, Monday)]
+                },
+                Modifiers::default()
+            ))
+        );
+    }
+
+    #[test]
+    fn position_without_frequency() {
+        // "first and third monday" -> monthly
+        assert_eq!(
+            patternize(vec![
+                OrdinalPosition(1),
+                OrdinalPosition(3),
+                Weekday(Monday)
+            ]),
+            Ok((
+                MonthlyByPosition {
+                    interval: 1,
+                    days: vec![(1, Monday), (3, Monday)]
+                },
+                Modifiers::default()
+            ))
+        );
+        // "the first monday of may" -> yearly
+        assert_eq!(
+            patternize(vec![OrdinalPosition(1), Weekday(Monday), Month(May)]),
+            Ok((
+                YearlyByPosition {
+                    month: May,
+                    days: vec![(1, Monday)]
+                },
+                Modifiers::default()
+            ))
+        );
+    }
+
+    #[test]
+    fn position_errors() {
+        // wrong frequency
+        assert!(patternize(vec![Frequency(Weekly), OrdinalPosition(1), Weekday(Monday)]).is_err());
+        assert!(
+            patternize(vec![
+                Frequency(Monthly),
+                OrdinalPosition(1),
+                Weekday(Monday),
+                Month(May)
+            ])
+            .is_err()
+        );
+        // position with no weekday after it
+        assert!(
+            patternize(vec![
+                OrdinalPosition(1),
+                Weekday(Monday),
+                OrdinalPosition(3)
+            ])
+            .is_err()
+        );
+        // weekday with no position before it
+        assert!(
+            patternize(vec![
+                OrdinalPosition(1),
+                Weekday(Monday),
+                Weekday(Wednesday)
+            ])
+            .is_err()
         );
     }
 

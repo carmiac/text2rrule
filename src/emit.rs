@@ -35,28 +35,20 @@ pub fn rrule(
             push_interval(&mut parts, *interval);
             parts.push(format!("BYMONTHDAY={}", join_u8(days)));
         }
-        RecurrencePattern::MonthlyByPosition {
-            interval,
-            pos,
-            weekday,
-        } => {
+        RecurrencePattern::MonthlyByPosition { interval, days } => {
             parts.push("FREQ=MONTHLY".into());
             push_interval(&mut parts, *interval);
-            parts.push(format!("BYDAY={}{}", pos, weekday_code(*weekday)));
+            parts.push(format!("BYDAY={}", join_positions(days)));
         }
         RecurrencePattern::YearlyByMonth { month, days } => {
             parts.push("FREQ=YEARLY".into());
             parts.push(format!("BYMONTH={}", month.as_u32()));
             parts.push(format!("BYMONTHDAY={}", join_u8(days)));
         }
-        RecurrencePattern::YearlyByPosition {
-            month,
-            pos,
-            weekday,
-        } => {
+        RecurrencePattern::YearlyByPosition { month, days } => {
             parts.push("FREQ=YEARLY".into());
             parts.push(format!("BYMONTH={}", month.as_u32()));
-            parts.push(format!("BYDAY={}{}", pos, weekday_code(*weekday)));
+            parts.push(format!("BYDAY={}", join_positions(days)));
         }
     }
 
@@ -85,6 +77,13 @@ fn push_interval(parts: &mut Vec<String>, interval: u32) {
 fn join_weekdays(days: &[Weekday]) -> String {
     days.iter()
         .map(|d| weekday_code(*d))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn join_positions(days: &[(i8, Weekday)]) -> String {
+    days.iter()
+        .map(|(pos, d)| format!("{}{}", pos, weekday_code(*d)))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -197,8 +196,7 @@ mod tests {
     fn monthly_by_position_positive() {
         let p = MonthlyByPosition {
             interval: 1,
-            pos: 3,
-            weekday: Friday,
+            days: vec![(3, Friday)],
         };
         assert_eq!(rrule(&p, None).unwrap(), "FREQ=MONTHLY;BYDAY=3FR");
     }
@@ -207,8 +205,7 @@ mod tests {
     fn monthly_by_position_negative() {
         let p = MonthlyByPosition {
             interval: 1,
-            pos: -1,
-            weekday: Friday,
+            days: vec![(-1, Friday)],
         };
         assert_eq!(rrule(&p, None).unwrap(), "FREQ=MONTHLY;BYDAY=-1FR");
     }
@@ -229,10 +226,33 @@ mod tests {
     fn yearly_by_position_memorial_day() {
         let p = YearlyByPosition {
             month: May,
-            pos: -1,
-            weekday: Monday,
+            days: vec![(-1, Monday)],
         };
         assert_eq!(rrule(&p, None).unwrap(), "FREQ=YEARLY;BYMONTH=5;BYDAY=-1MO");
+    }
+
+    #[test]
+    fn monthly_by_position_multi() {
+        let p = MonthlyByPosition {
+            interval: 2,
+            days: vec![(1, Monday), (3, Wednesday)],
+        };
+        assert_eq!(
+            rrule(&p, None).unwrap(),
+            "FREQ=MONTHLY;INTERVAL=2;BYDAY=1MO,3WE"
+        );
+    }
+
+    #[test]
+    fn yearly_by_position_multi() {
+        let p = YearlyByPosition {
+            month: May,
+            days: vec![(1, Monday), (3, Monday)],
+        };
+        assert_eq!(
+            rrule(&p, None).unwrap(),
+            "FREQ=YEARLY;BYMONTH=5;BYDAY=1MO,3MO"
+        );
     }
 
     #[test]
