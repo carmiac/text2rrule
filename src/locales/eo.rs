@@ -1,4 +1,6 @@
+use crate::locales::mark_positions;
 use crate::{error::ParseError, token::Token};
+use std::collections::HashSet;
 
 /// Normalize a plain-Esperanto recurrence string into a canonical form for tokenization.
 ///
@@ -34,16 +36,13 @@ pub fn normalize(input: &str) -> String {
     // Per-word loop.
     let mut result: Vec<String> = Vec::new();
     for word in s.split_whitespace() {
-        // Strip ordinal-adjective suffix `a` from numeric stems: 1a → 1, 15a → 1.
-        let word = strip_ordinal_a(word);
-
-        // Drop a bare "a" immediately following an all-digit token — residual
-        // from "1-a" being split into "1" and "a" by the punctuation pass.
+        // Rejoin "1-a", split into "1" and "a" by the punctuation pass, into the ordinal "1a".
         if word == "a"
-            && result
-                .last()
-                .is_some_and(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit()))
+            && let Some(last) = result.last_mut()
+            && !last.is_empty()
+            && last.chars().all(|c| c.is_ascii_digit())
         {
+            last.push('a');
             continue;
         }
 
@@ -113,16 +112,16 @@ pub fn normalize(input: &str) -> String {
             "dek" => "10",
 
             // Ordinal words (nominative + accusative).
-            "unua" | "unuan" => "1",
-            "dua" | "duan" => "2",
-            "tria" | "trian" => "3",
-            "kvara" | "kvaran" => "4",
-            "kvina" | "kvinan" => "5",
-            "sesa" | "sesan" => "6",
-            "sepa" | "sepan" => "7",
-            "oka" | "okan" => "8",
-            "naŭa" | "naŭan" | "naua" | "nauan" => "9",
-            "deka" | "dekan" => "10",
+            "unua" | "unuan" => "1a",
+            "dua" | "duan" => "2a",
+            "tria" | "trian" => "3a",
+            "kvara" | "kvaran" => "4a",
+            "kvina" | "kvinan" => "5a",
+            "sesa" | "sesan" => "6a",
+            "sepa" | "sepan" => "7a",
+            "oka" | "okan" => "8a",
+            "naŭa" | "naŭan" | "naua" | "nauan" => "9a",
+            "deka" | "dekan" => "10a",
             "lasta" | "lastan" => "-1",
 
             // Count word.
@@ -141,6 +140,11 @@ pub fn normalize(input: &str) -> String {
     }
 
     result.join(" ")
+}
+
+/// Parse a cardinal (2, -1) or ordinal (2a) number.
+fn parse_number(s: &str) -> Option<i32> {
+    strip_ordinal_a(s).parse().ok()
 }
 
 fn strip_ordinal_a(w: &str) -> &str {
@@ -173,8 +177,15 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
     let mut until = false;
     let mut until_month: Option<u32> = None;
     let mut until_day: Option<u32> = None;
+    let mut ordinals: HashSet<usize> = HashSet::new(); // indices of tokens written as ordinals
+    let mut after_every: Option<usize> = None; // index of an Interval right after "every"
+    let mut prev_word: Option<&str> = None;
 
     for word in input.split_whitespace() {
+        let follows_every = prev_word.is_some_and(|w| w == "ĉiu" || w == "ĉiun");
+        prev_word = Some(word);
+        let mut is_ordinal = false;
+
         let token: Option<Token> = match word {
             // Frequencies.
             "tago" => Some(Frequency(Daily)),
@@ -240,8 +251,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             }
 
             // Numbers.
-            s if s.parse::<i32>().is_ok() => {
-                let n = s.parse::<i32>().unwrap();
+            s if parse_number(s).is_some() => {
+                let n = parse_number(s).unwrap();
+                is_ordinal = s.parse::<i32>().is_err();
                 if n < 0 {
                     Some(OrdinalPosition(n))
                 } else if the_context || monthday_streak {
@@ -318,21 +330,21 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
                 }
             }
 
-            // "la N <weekday>": MonthDay followed by Weekday means it was OrdinalPosition.
-            if let Weekday(_) = &token
-                && let Some(MonthDay(n)) = tokens.last().copied()
-            {
-                *tokens.last_mut().unwrap() = OrdinalPosition(n as i32);
+            if let Weekday(_) = &token {
+                mark_positions(&mut tokens, &ordinals, after_every);
             }
 
-            // "N de la monato" / "N <weekday> de la monato": fix preceding Interval.
-            if of_context && let Frequency(_) = &token {
+            // "N <weekday> de la monato" / "N <weekday> de majo": the preceding Interval is a position.
+            if of_context && matches!(token, Frequency(_) | Month(_)) {
                 let anchor = of_pos.unwrap_or(tokens.len());
                 if anchor >= 2 {
                     if let (Interval(n), Weekday(_)) = (tokens[anchor - 2], tokens[anchor - 1]) {
                         tokens[anchor - 2] = OrdinalPosition(n as i32);
                     }
                 }
+            }
+            if of_context && let Frequency(_) = &token {
+                let anchor = of_pos.unwrap_or(tokens.len());
                 // Walk back through trailing Intervals before "de" and rewrite as MonthDays.
                 let mut i = anchor;
                 while i > 0 {
@@ -352,6 +364,12 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
             }
             if !matches!(token, MonthDay(_)) {
                 monthday_streak = false;
+            }
+            if is_ordinal {
+                ordinals.insert(tokens.len());
+            }
+            if follows_every && matches!(token, Interval(_)) {
+                after_every = Some(tokens.len());
             }
             tokens.push(token);
         }
@@ -519,29 +537,29 @@ mod tests {
 
     #[test]
     fn ordinal_words() {
-        assert_eq!(normalize("unua"), "1");
-        assert_eq!(normalize("dua"), "2");
-        assert_eq!(normalize("tria"), "3");
-        assert_eq!(normalize("kvara"), "4");
-        assert_eq!(normalize("kvina"), "5");
-        assert_eq!(normalize("sesa"), "6");
-        assert_eq!(normalize("sepa"), "7");
-        assert_eq!(normalize("oka"), "8");
-        assert_eq!(normalize("naŭa"), "9");
-        assert_eq!(normalize("deka"), "10");
+        assert_eq!(normalize("unua"), "1a");
+        assert_eq!(normalize("dua"), "2a");
+        assert_eq!(normalize("tria"), "3a");
+        assert_eq!(normalize("kvara"), "4a");
+        assert_eq!(normalize("kvina"), "5a");
+        assert_eq!(normalize("sesa"), "6a");
+        assert_eq!(normalize("sepa"), "7a");
+        assert_eq!(normalize("oka"), "8a");
+        assert_eq!(normalize("naŭa"), "9a");
+        assert_eq!(normalize("deka"), "10a");
         assert_eq!(normalize("lasta"), "-1");
         assert_eq!(normalize("lastan"), "-1");
         // accusative ordinal-adjective forms
-        assert_eq!(normalize("trian"), "3");
-        assert_eq!(normalize("duan"), "2");
+        assert_eq!(normalize("trian"), "3a");
+        assert_eq!(normalize("duan"), "2a");
     }
 
     #[test]
     fn ordinal_suffix_a() {
-        assert_eq!(normalize("1a"), "1");
-        assert_eq!(normalize("15a"), "15");
-        assert_eq!(normalize("1-a"), "1");
-        assert_eq!(normalize("15-a"), "15");
+        assert_eq!(normalize("1a"), "1a");
+        assert_eq!(normalize("15a"), "15a");
+        assert_eq!(normalize("1-a"), "1a");
+        assert_eq!(normalize("15-a"), "15a");
     }
 
     #[test]
@@ -549,14 +567,14 @@ mod tests {
         assert_eq!(normalize("Ĉiun alian vendredon."), "ĉiu 2 vendredo");
         assert_eq!(
             normalize("Ĉiumonate je la tria vendredo"),
-            "ĉiu monato je la 3 vendredo"
+            "ĉiu monato je la 3a vendredo"
         );
         assert_eq!(
             normalize("Ĉiujare je la 1a de junio"),
-            "ĉiu jaro je la 1 de junio"
+            "ĉiu jaro je la 1a de junio"
         );
         // ĉiun + ordinal-adjective is equivalent to ĉiun alian for the tokenizer
-        assert_eq!(normalize("ĉiun duan semajnon"), "ĉiun 2 semajno");
+        assert_eq!(normalize("ĉiun duan semajnon"), "ĉiun 2a semajno");
         assert_eq!(normalize("cxiun alian vendredon"), "ĉiu 2 vendredo");
         assert_eq!(
             normalize("ĉiun lastan vendredon de la monato"),
